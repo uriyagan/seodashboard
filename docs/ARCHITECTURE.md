@@ -19,6 +19,10 @@
                          │   גישת אדמינים בלבד (2)                │
                          └───────────────┬──────────────────────┘
                                          │  (Worker /api = שרת מאובטח, סודות=Secrets)
+                         ┌───────────────────────────────────────┐
+                         │ Cloudflare Cron Trigger (יומי)         │
+                         │ ניטור קצב → התראות Resend              │
+                         └───────────────────────────────────────┘
         ┌──────────────┬─────────────────┼──────────────────┬─────────────────┐
         │              │                 │                  │                 │
  ┌──────▼──────┐ ┌─────▼──────┐   ┌───────▼───────┐  ┌───────▼──────┐  ┌───────▼───────┐
@@ -43,10 +47,10 @@
 - **דומיין:** `seo.uriyaganor.com`.
 - **גישה:** אדמינים בלבד, 2 משתמשים (Supabase Auth + allowlist).
 - **Backend:** Next.js **API Routes** משמשות כשכבת שרת מאובטחת — כל הקריאות לשירותים החיצוניים (Gemini, Resend, WordPress, service-role של Supabase) עוברות דרך השרת בלבד. מפתחות ה-API לעולם לא נחשפים ללקוח.
-- **UI:** Tailwind + shadcn/ui, **עברית מלאה + RTL** (`dir="rtl"`, `lang="he"`), עיצוב SaaS מודרני ונקי, גופן עברי (Assistant/Heebo), תמיכת Light/Dark ו-Responsive. **עורך:** TipTap (HTML נקי תואם WordPress).
+- **UI:** Tailwind + shadcn/ui, **עברית מלאה + RTL** (`dir="rtl"`, `lang="he"`), עיצוב SaaS מודרני ונקי, גופן עברי (Assistant/Heebo), תמיכת Light/Dark ו-Responsive. **עורך:** TinyMCE — זהה ל-Classic Editor של WordPress (לא Gutenberg), פלט HTML.
 
 ### 2. Supabase — נתונים, אימות ואחסון
-- **DB (Postgres):** projects (כולל `content_prompt` + `image_prompt` per-לקוח), posts, ideas, images, admins, settings.
+- **DB (Postgres):** projects (כולל `content_prompt` + `image_prompt` + `cadence` + `last_post_at` per-לקוח), posts (כולל סטטוס/`pushed_at`/`published_at`), ideas, images, admins, settings.
 - **Auth:** הגבלה ל-2 אדמינים.
 - **Storage:** גיבוי תמונות שנוצרו.
 - **RLS:** גישה לאדמינים המורשים בלבד.
@@ -59,7 +63,13 @@
 - מודל התמונות של Gemini. יצירת תמונה ראשית + תמונות גוף לפי פרומפט כללי קבוע + הנחיה ספציפית.
 
 ### 5. Resend — התראות מייל
-- מייל ל-2 האדמינים על אירועים נבחרים.
+- מייל ל-2 האדמינים על אירועים נבחרים ועל ניטור הקצב.
+
+### 5b. Cloudflare Cron Trigger — תזמון וניטור
+- **Worker מתוזמן** (Cron) שרץ מדי יום, בודק כל פרויקט מול הקצב (`cadence`):
+  - אם לא נדחף פוסט בחלון הקצב → התראת "לא הועלה פוסט השבוע".
+  - אם קיימת טיוטה שנוצרה ולא פורסמה (status `draft` באתר אחרי X ימים) → התראת "נוצר אך לא פורסם".
+- בדיקת סטטוס מול WP REST + שליחת מיילים דרך Resend.
 
 ### 6. WordPress — אתרי לקוחות (מרובה)
 - חיבור לכל אתר דרך **REST API** עם **Application Passwords**.
@@ -119,7 +129,9 @@ API Route → משיכת כל כותרות הפוסטים מ-WP REST
 | 5c | גיבוי ל-GitHub (uriyagan/seodashboard) | דרישת המשתמש — גיבוי שוטף | 2026-07-21 |
 | 6 | חיבור WP: REST + Application Passwords | סטנדרטי, מובנה, ללא תלות ב-plugin חיצוני מלבד snippet ל-Yoast | 2026-07-21 (מוצע) |
 | 7 | Yoast דרך mu-plugin | WP REST לא מאפשר כתיבה ל-meta מוגן כברירת מחדל | 2026-07-21 (מוצע) |
-| 8 | עורך TipTap (HTML) | פתרון ריאלי ל"עורך כמו WP" בלי לשכפל Gutenberg | 2026-07-21 (מוצע) |
+| 8 | עורך TinyMCE (Classic Editor) | דרישה מפורשת: עורך זהה לזה של WordPress, לא Gutenberg | 2026-07-21 |
+| 9 | פרסום = תמיד טיוטה (Draft) | דרישה מפורשת; פרסום live נעשה ידנית באתר | 2026-07-21 |
+| 10 | תזמון וניטור עם Cloudflare Cron + Resend | דרישה: שליטה בקצב + התראות פיגור/טיוטה תקועה | 2026-07-21 |
 
 ---
 
