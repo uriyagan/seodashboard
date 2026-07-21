@@ -36,7 +36,7 @@
 - **API:** WordPress REST API — `/wp-json/wp/v2/...`.
 - **אימות:** **Application Passwords** (מובנה ב-WP 5.6+) — לכל אתר.
 - **נשמר מוצפן ב-Supabase לכל פרויקט:** `site_url`, `wp_username`, `wp_application_password`.
-- **Yoast:** נדרש **mu-plugin** ייעודי בכל אתר (נספק) לחשיפת `_yoast_wpseo_focuskw` / `_title` / `_metadesc` ל-REST לכתיבה.
+- **Yoast:** בכל אתר מוסיפים **סניפט ל-`functions.php` של תבנית הבן** (השיטה שנבחרה; ראה `wordpress-plugin/functions-snippet.php`) לחשיפת `_yoast_wpseo_focuskw` / `_title` / `_metadesc` ל-REST לכתיבה.
 - **דורש מהמשתמש:** רשימת אתרי הלקוחות + משתמש admin בכל אתר עם הרשאה ליצור Application Password ולהתקין mu-plugin.
 - **סטטוס:** ⏳ ממתין לרשימת אתרים ופרטי גישה.
 
