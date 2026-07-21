@@ -11,6 +11,10 @@
   },
   "observability": {
     "enabled": true
+  },
+  "triggers": {
+    // Daily at 06:00 UTC — cadence & stuck-draft monitoring (Phase 7).
+    "crons": ["0 6 * * *"]
   }
   // Secrets (set via `wrangler secret put` in production):
   //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,

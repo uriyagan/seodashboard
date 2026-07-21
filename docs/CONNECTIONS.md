@@ -25,9 +25,9 @@
 - **API:** Google Generative AI API (Gemini).
 - **משתני סביבה נדרשים:**
   - `GEMINI_API_KEY` (server-side בלבד)
-- **מודלים:**
-  - טקסט: `gemini-*` (ייקבע בעת ההקמה — הדור העדכני).
-  - תמונות: Nano Banana 2 (מזהה מודל מדויק יאומת בעת ההקמה).
+- **מודלים (ניתנים לשינוי דרך env):**
+  - טקסט: `gemini-3-pro` (ברירת מחדל; משתנה `GEMINI_TEXT_MODEL`).
+  - תמונות (Nano Banana 2): `gemini-3.1-flash-image` (משתנה `GEMINI_IMAGE_MODEL`).
 - **דורש:** חשבון Google AI Studio / Google Cloud עם חיוב מופעל למודל התמונות.
 - **סטטוס:** ⏳ ממתין למפתח API.
 
@@ -117,6 +117,16 @@ ENCRYPTION_KEY=
 | `/api/projects/test-connection` | POST | אימות Application Password + זיהוי Yoast (שלב 2) | WordPress |
 | `/api/projects/connect` | POST | יצירת פרויקט (סיסמה מוצפנת AES-GCM) + סנכרון מיידי (שלב 3) | WordPress, Supabase |
 | `/api/projects/:id/sync` | POST | סנכרון מחדש של פוסטים/טקסונומיות | WordPress, Supabase |
+| `/api/projects/:id/posts/:wpId` | GET | משיכת תוכן מלא + Yoast של פוסט (לעריכה) | WordPress |
+| `/api/projects/:id/posts/push` | POST | דחיפת פוסט כטיוטה + Yoast + קטגוריות/תגיות | WordPress, Supabase |
+| `/api/projects/:id/terms` | POST | יצירת קטגוריה/תגית חדשה | WordPress, Supabase |
+| `/api/projects/:id/media` | POST | העלאת תמונה למדיה של WP | WordPress |
+| `/api/projects/:id/ai/write` | POST | כתיבת מאמר עם Gemini (content_prompt) | Gemini |
+| `/api/projects/:id/ai/image` | POST | יצירת תמונה (Nano Banana 2) + העלאה למדיה | Gemini, WordPress |
+| `/api/projects/:id/ideas/generate` | POST | 10 רעיונות מ-Gemini לפי כותרות קיימות | Gemini, Supabase |
+| `/api/projects/:id/ideas/:ideaId/write` | POST | כתיבת פוסט מרעיון (מאמר+תמונה) → טיוטה מקומית | Gemini, WordPress, Supabase |
+| `/api/monitor/run` | POST | הרצת ניטור הקצב ידנית (זהה ל-Cron) | Supabase, Resend |
+| `scheduled` (Cron) | — | ניטור יומי אוטומטי (06:00 UTC) | Supabase, Resend |
 
 **הצפנת סודות WP:** ה-Application Password מוצפן ב-Worker (AES-GCM, `ENCRYPTION_KEY`) ונשמר כ-ciphertext ב-`projects.wp_app_password_encrypted`. פענוח מתבצע רק בצד השרת בעת סנכרון.
 **אימות API:** ה-Frontend שולח את ה-access token של Supabase; ה-Worker פונה ל-Supabase עם ה-token (RLS חל) ומאמת `is_admin()`.

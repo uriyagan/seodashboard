@@ -57,12 +57,22 @@
 - [x] **Phase 0** — git + גיבוי GitHub, פרטי Supabase
 - [x] **Phase 1** — שלד אפליקציה, Auth, סכמת Supabase + RLS, סוויצ'ר פרויקטים
 - [ ] יצירת/הזמנת 2 משתמשי האדמין ב-Supabase (פעולת משתמש)
-- [x] **Phase 2** — אינטגרציית WordPress + אשף הוספת אתר + סנכרון *(נבנה; ממתין לבדיקה מול אתר אמיתי)*
-- [ ] **Phase 3** — מסך העורך (TinyMCE)
-- [ ] **Phase 4–5** — Gemini (טקסט) + Nano Banana 2 (תמונות)
-- [ ] **Phase 6** — מנוע רעיונות
-- [ ] **Phase 7** — תזמון, ניטור והתראות (Cron + Resend)
-- [ ] **Phase 8** — פריסה לסאב-דומיין
+- [x] **Phase 2** — אינטגרציית WordPress + אשף הוספת אתר + סנכרון *(נבנה)*
+- [x] **Phase 3** — מסך העורך (TinyMCE) + Yoast + קטגוריות/תגיות *(נבנה)*
+- [x] **Phase 4–5** — Gemini (טקסט) + Nano Banana 2 (תמונות) *(נבנה)*
+- [x] **Phase 6** — מנוע רעיונות *(נבנה)*
+- [x] **Phase 7** — תזמון, ניטור והתראות (Cron + Resend) *(נבנה)*
+- [x] **Phase 8** — הכנה לפריסה (mu-plugin, DEPLOY.md, wrangler + cron) *(נבנה)*
+- [ ] **בדיקות מקצה-לקצה** — מול אתר WordPress אמיתי + מפתחות Gemini/Resend
+- [ ] **פריסה בפועל** לסאב-דומיין (דורש חשבון Cloudflare + secrets)
+
+### מה נבנה ב-Phases 2–8
+- **WordPress:** קליינט REST מלא (קריאה/כתיבה), הצפנת AES-GCM, אשף הוספת אתר 3 צעדים + סנכרון, mu-plugin ל-Yoast.
+- **עורך:** TinyMCE (כמו Classic Editor), שדות Yoast, בורר קטגוריות/תגיות עם יצירה, תמונה ראשית, שמירת טיוטה + דחיפה ל-WP.
+- **AI:** Gemini (`gemini-3-pro`) לכתיבת מאמרים ורעיונות; Nano Banana 2 (`gemini-3.1-flash-image`) לתמונות + העלאה למדיה של WP.
+- **מנוע רעיונות:** "הצע רעיונות" → 10 כותרות → "כתוב פוסט" (מאמר+תמונה) → נחיתה בעורך.
+- **תזמון:** Cloudflare Cron יומי, ניטור קצב + טיוטות תקועות, התראות מייל (Resend).
+- **הגדרות:** עריכת 2 הפרומפטים per-לקוח, קצב, סנכרון, מחיקה.
 
 ### מה נבנה ב-Phase 1
 - אפליקציית React 19 + Vite 7 + TS + Tailwind v4 (RTL, עברית, גופן Assistant).
@@ -74,11 +84,12 @@
 
 ---
 
-## שלבים הבאים
+## שלבים הבאים (בדיקות ופריסה)
 
 1. **פעולת משתמש:** יצירת/הזמנת 2 האדמינים ב-Supabase (Dashboard → Authentication → Users).
-2. התחלת **Phase 2** — אשף הוספת אתר + חיבור WordPress + סנכרון פוסטים.
-3. בהמשך: הגדרת Supabase Auth SMTP דרך Resend + Site URL לפרודקשן.
+2. **מפתחות:** Gemini API key + Resend (דומיין מאומת) → הגדרה ב-`.env.local` (dev) / Worker Secrets (prod).
+3. **אתר בדיקה:** WordPress אחד + Application Password + התקנת ה-mu-plugin → בדיקת סנכרון, עריכה, דחיפה, AI, רעיונות.
+4. **פריסה:** לפי [DEPLOY.md](DEPLOY.md) — Cloudflare Worker + סאב-דומיין + Cron + הגדרות Supabase Auth.
 
 ---
 
@@ -94,4 +105,5 @@
 | 2026-07-21 | החלטת עיצוב: ממשק עברית מלאה, RTL, סגנון SaaS מודרני ונקי (סעיף 2b ב-PLAN). |
 | 2026-07-21 | החלטות: עורך = TinyMCE (Classic Editor, לא Gutenberg); פרסום = תמיד טיוטה. פיצ'ר חדש: תזמון וניטור קצב פרסום עם Cloudflare Cron + התראות ("לא הועלה פוסט השבוע" / "נוצר אך לא פורסם") — סעיף 3c ב-PLAN. |
 | 2026-07-21 | **Phase 0+1 הושלמו:** סכמת Supabase + RLS (7 טבלאות, `is_admin()`, זריעת 2 אדמינים), שלד React+Vite+Cloudflare Worker, מסכי Auth (התחברות/שכחתי/איפוס), סוויצ'ר פרויקטים ודאשבורד. הבנייה עוברת, מסך התחברות נבדק. נדחף לגיט. |
-| 2026-07-21 | **Phase 2 נבנה:** קליינט WordPress REST ב-Worker, הצפנת AES-GCM ל-Application Password, אשף הוספת אתר בן 3 צעדים (check-url / test-connection / connect+sync), סנכרון פוסטים+קטגוריות+תגיות, זיהוי Yoast, מסך רשימת פוסטים + סנכרון מחדש. API נבדק (health + gate 401). ממתין לבדיקה מול אתר WordPress אמיתי. |
+| 2026-07-21 | **Phase 2 נבנה:** קליינט WordPress REST ב-Worker, הצפנת AES-GCM ל-Application Password, אשף הוספת אתר בן 3 צעדים (check-url / test-connection / connect+sync), סנכרון פוסטים+קטגוריות+תגיות, זיהוי Yoast, מסך רשימת פוסטים + סנכרון מחדש. API נבדק (health + gate 401). |
+| 2026-07-21 | **Phases 3–8 נבנו:** עורך TinyMCE + Yoast + קטגוריות/תגיות + תמונה ראשית + דחיפה כטיוטה; אינטגרציית Gemini (טקסט) ו-Nano Banana 2 (תמונות) + העלאה למדיה; מנוע רעיונות (10 רעיונות → כתיבה אוטומטית); Cloudflare Cron יומי לניטור קצב + טיוטות תקועות + התראות Resend; מסך הגדרות (פרומפטים/קצב/סנכרון/מחיקה); mu-plugin ל-Yoast; DEPLOY.md. הבנייה עוברת, bundle מפוצל (TinyMCE lazy). ממתין למפתחות ולבדיקות מקצה-לקצה. |

@@ -100,6 +100,152 @@ export async function fetchAllTerms(
   return out;
 }
 
+export interface WpPostFull {
+  id: number;
+  title: string;
+  content_html: string;
+  status: string;
+  categories: number[];
+  tags: number[];
+  featured_media: number;
+  focus_keyword: string;
+  seo_title: string;
+  meta_description: string;
+}
+
+/** Fetches a single post's full content + Yoast meta (context=edit). */
+export async function fetchPostFull(auth: WpAuth, wpId: number): Promise<WpPostFull> {
+  const res = await fetch(
+    `${apiBase(auth.siteUrl)}/posts/${wpId}?context=edit&_fields=id,title,content,status,categories,tags,featured_media,meta,yoast_head_json`,
+    { headers: { Authorization: authHeader(auth), Accept: "application/json" } }
+  );
+  if (!res.ok) throw new Error(`fetch post ${wpId} failed: HTTP ${res.status}`);
+  const p = (await res.json()) as {
+    id: number;
+    title: { raw?: string; rendered: string };
+    content: { raw?: string; rendered: string };
+    status: string;
+    categories?: number[];
+    tags?: number[];
+    featured_media?: number;
+    meta?: Record<string, string>;
+    yoast_head_json?: { title?: string; description?: string };
+  };
+  return {
+    id: p.id,
+    title: p.title?.raw ?? p.title?.rendered ?? "",
+    content_html: p.content?.raw ?? p.content?.rendered ?? "",
+    status: p.status,
+    categories: p.categories ?? [],
+    tags: p.tags ?? [],
+    featured_media: p.featured_media ?? 0,
+    focus_keyword: p.meta?._yoast_wpseo_focuskw ?? "",
+    seo_title: p.meta?._yoast_wpseo_title ?? p.yoast_head_json?.title ?? "",
+    meta_description:
+      p.meta?._yoast_wpseo_metadesc ?? p.yoast_head_json?.description ?? "",
+  };
+}
+
+export interface PushPostInput {
+  wpId?: number | null;
+  title: string;
+  content_html: string;
+  categories: number[];
+  tags: number[];
+  featured_media?: number | null;
+  focus_keyword?: string;
+  seo_title?: string;
+  meta_description?: string;
+}
+
+/** Creates or updates a post on WordPress, always as a draft. Sets Yoast meta. */
+export async function pushPost(auth: WpAuth, input: PushPostInput): Promise<number> {
+  const isUpdate = Boolean(input.wpId);
+  const url = isUpdate
+    ? `${apiBase(auth.siteUrl)}/posts/${input.wpId}`
+    : `${apiBase(auth.siteUrl)}/posts`;
+
+  const body: Record<string, unknown> = {
+    title: input.title,
+    content: input.content_html,
+    status: "draft", // always draft
+    categories: input.categories,
+    tags: input.tags,
+    // Requires the companion mu-plugin to expose these Yoast meta keys to REST.
+    meta: {
+      _yoast_wpseo_focuskw: input.focus_keyword ?? "",
+      _yoast_wpseo_title: input.seo_title ?? "",
+      _yoast_wpseo_metadesc: input.meta_description ?? "",
+    },
+  };
+  if (input.featured_media) body.featured_media = input.featured_media;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: authHeader(auth),
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`push post failed: HTTP ${res.status} ${detail.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as { id: number };
+  return json.id;
+}
+
+/** Creates a new category or tag; returns its id + name. */
+export async function createTerm(
+  auth: WpAuth,
+  taxonomy: "categories" | "tags",
+  name: string
+): Promise<WpTerm> {
+  const res = await fetch(`${apiBase(auth.siteUrl)}/${taxonomy}`, {
+    method: "POST",
+    headers: {
+      Authorization: authHeader(auth),
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    // Term may already exist — surface a clean error.
+    const detail = await res.text().catch(() => "");
+    throw new Error(`create term failed: HTTP ${res.status} ${detail.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as { id: number; name: string; slug: string };
+  return { id: json.id, name: json.name, slug: json.slug };
+}
+
+/** Uploads an image to the WordPress media library; returns id + source URL. */
+export async function uploadMedia(
+  auth: WpAuth,
+  bytes: Uint8Array,
+  filename: string,
+  mimeType: string
+): Promise<{ id: number; url: string }> {
+  const res = await fetch(`${apiBase(auth.siteUrl)}/media`, {
+    method: "POST",
+    headers: {
+      Authorization: authHeader(auth),
+      "Content-Type": mimeType,
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      Accept: "application/json",
+    },
+    body: bytes as unknown as BodyInit,
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`upload media failed: HTTP ${res.status} ${detail.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as { id: number; source_url: string };
+  return { id: json.id, url: json.source_url };
+}
+
 /** Fetches all posts (metadata + titles), paginated. Content is fetched lazily elsewhere. */
 export async function fetchAllPosts(auth: WpAuth): Promise<WpPostSummary[]> {
   const out: WpPostSummary[] = [];

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { FileText, RefreshCw } from "lucide-react";
+import { FileText, Plus, RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
@@ -33,7 +33,13 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-export function PostsList() {
+export function PostsList({
+  onNew,
+  onEdit,
+}: {
+  onNew: () => void;
+  onEdit: (postId: string) => void;
+}) {
   const { activeProject } = useProjects();
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,10 +87,16 @@ export function PostsList() {
           <h1 className="text-2xl font-bold text-[var(--text)]">פוסטים</h1>
           <p className="text-sm text-[var(--muted)]">{posts.length} פוסטים בפרויקט</p>
         </div>
-        <Button variant="outline" onClick={resync} loading={syncing}>
-          {!syncing && <RefreshCw className="size-4" />}
-          סנכרון מחדש
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={resync} loading={syncing}>
+            {!syncing && <RefreshCw className="size-4" />}
+            סנכרון מחדש
+          </Button>
+          <Button onClick={onNew}>
+            <Plus className="size-4" />
+            פוסט חדש
+          </Button>
+        </div>
       </div>
 
       {error && <p className="mb-4 text-sm text-[var(--color-danger)]">{error}</p>}
@@ -115,7 +127,8 @@ export function PostsList() {
                 {posts.map((p) => (
                   <tr
                     key={p.id}
-                    className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--surface-2)]"
+                    onClick={() => onEdit(p.id)}
+                    className="cursor-pointer border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--surface-2)]"
                   >
                     <td className="max-w-md truncate px-4 py-3 font-medium text-[var(--text)]">
                       {p.title || "(ללא כותרת)"}

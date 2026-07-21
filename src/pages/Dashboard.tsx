@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import {
   FileText,
   Lightbulb,
@@ -15,7 +15,14 @@ import { ProjectsProvider, useProjects } from "@/lib/projects";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { AddSiteWizard } from "@/components/AddSiteWizard";
 import { PostsList } from "@/components/PostsList";
+import { IdeasList } from "@/components/IdeasList";
+import { ProjectSettings } from "@/components/ProjectSettings";
 import { ThemeToggle } from "@/components/ThemeToggle";
+
+// TinyMCE is heavy — load the editor only when needed.
+const PostEditor = lazy(() =>
+  import("@/components/PostEditor").then((m) => ({ default: m.PostEditor }))
+);
 import { Button, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -104,18 +111,6 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div className="p-6">
-      <Card className="flex flex-col items-center justify-center gap-2 p-12 text-center">
-        <CalendarClock className="size-8 text-[var(--muted)]" />
-        <h3 className="text-lg font-semibold text-[var(--text)]">{title}</h3>
-        <p className="text-sm text-[var(--muted)]">המסך הזה ייבנה בשלב הבא של הפרויקט.</p>
-      </Card>
-    </div>
-  );
-}
-
 function Overview() {
   const { activeProject } = useProjects();
   if (!activeProject) return null;
@@ -162,8 +157,51 @@ function Overview() {
 
 function DashboardInner() {
   const { projects, loading } = useProjects();
-  const [nav, setNav] = useState<NavKey>("overview");
+  const [nav, setNavState] = useState<NavKey>("overview");
   const [addOpen, setAddOpen] = useState(false);
+  // editing = null (not editing) | { postId: string | null } (null = new post)
+  const [editing, setEditing] = useState<{ postId: string | null } | null>(null);
+  const [listKey, setListKey] = useState(0);
+
+  function setNav(k: NavKey) {
+    setEditing(null);
+    setNavState(k);
+  }
+
+  function openEditor(postId: string | null) {
+    setEditing({ postId });
+  }
+
+  function closeEditor() {
+    setEditing(null);
+    setListKey((k) => k + 1); // refresh lists after returning
+  }
+
+  function renderContent() {
+    if (editing !== null) {
+      return (
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center">
+              <Spinner className="size-7" />
+            </div>
+          }
+        >
+          <PostEditor postId={editing.postId} onBack={closeEditor} />
+        </Suspense>
+      );
+    }
+    switch (nav) {
+      case "overview":
+        return <Overview />;
+      case "posts":
+        return <PostsList key={listKey} onNew={() => openEditor(null)} onEdit={openEditor} />;
+      case "ideas":
+        return <IdeasList key={listKey} onEditPost={openEditor} />;
+      case "settings":
+        return <ProjectSettings />;
+    }
+  }
 
   return (
     <div className="flex h-full">
@@ -177,14 +215,8 @@ function DashboardInner() {
             </div>
           ) : projects.length === 0 ? (
             <EmptyState onAdd={() => setAddOpen(true)} />
-          ) : nav === "overview" ? (
-            <Overview />
-          ) : nav === "posts" ? (
-            <PostsList />
-          ) : nav === "ideas" ? (
-            <Placeholder title="רעיונות" />
           ) : (
-            <Placeholder title="הגדרות" />
+            renderContent()
           )}
         </main>
       </div>

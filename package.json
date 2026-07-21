@@ -14,13 +14,15 @@
   "dependencies": {
     "@fontsource-variable/assistant": "^5.2.5",
     "@supabase/supabase-js": "^2.58.0",
+    "@tinymce/tinymce-react": "^6.3.0",
     "clsx": "^2.1.1",
     "hono": "^4.9.0",
     "lucide-react": "^0.544.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.9.0",
-    "tailwind-merge": "^3.3.0"
+    "tailwind-merge": "^3.3.0",
+    "tinymce": "^7.9.3"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.13.0",
