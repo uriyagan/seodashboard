@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Env & secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+.dev.vars
+*.pem
+
+# Build output
+dist/
+build/
+.next/
+out/
+.open-next/
+
+# Cloudflare
+.wrangler/
+wrangler.toml.bak
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Testing
+coverage/
+
+# Misc
+.turbo/
+*.tsbuildinfo
