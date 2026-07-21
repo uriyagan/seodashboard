@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Design tokens — modern clean SaaS, light + dark
+   ============================================================ */
+@theme {
+  --font-sans: "Assistant Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-bg: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-surface-2: #f2f4f7;
+  --color-border: #e4e7ec;
+  --color-text: #101828;
+  --color-muted: #667085;
+
+  --color-brand: #6c5ce7;
+  --color-brand-hover: #5a4bd4;
+  --color-brand-soft: #eeecfb;
+  --color-brand-fg: #ffffff;
+
+  --color-success: #12b76a;
+  --color-warning: #f79009;
+  --color-danger: #f04438;
+
+  --radius-lg: 0.875rem;
+}
+
+:root {
+  --bg: var(--color-bg);
+  --surface: var(--color-surface);
+  --surface-2: var(--color-surface-2);
+  --border: var(--color-border);
+  --text: var(--color-text);
+  --muted: var(--color-muted);
+  --brand: var(--color-brand);
+  --brand-hover: var(--color-brand-hover);
+  --brand-soft: var(--color-brand-soft);
+}
+
+:root[data-theme="dark"],
+html.dark {
+  --bg: #0f1117;
+  --surface: #171922;
+  --surface-2: #1f2230;
+  --border: #2a2e3d;
+  --text: #e7e9ee;
+  --muted: #98a2b3;
+  --brand: #7c6cf0;
+  --brand-hover: #8f80f5;
+  --brand-soft: #23213a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1117;
+    --surface: #171922;
+    --surface-2: #1f2230;
+    --border: #2a2e3d;
+    --text: #e7e9ee;
+    --muted: #98a2b3;
+    --brand: #7c6cf0;
+    --brand-hover: #8f80f5;
+    --brand-soft: #23213a;
+  }
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Thin, modern scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
