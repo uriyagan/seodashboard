@@ -63,8 +63,12 @@
 - [x] **Phase 6** — מנוע רעיונות *(נבנה)*
 - [x] **Phase 7** — תזמון, ניטור והתראות (Cron + Resend) *(נבנה)*
 - [x] **Phase 8** — הכנה לפריסה (mu-plugin, DEPLOY.md, wrangler + cron) *(נבנה)*
-- [ ] **בדיקות מקצה-לקצה** — מול אתר WordPress אמיתי + מפתחות Gemini/Resend
-- [ ] **פריסה בפועל** לסאב-דומיין (דורש חשבון Cloudflare + secrets)
+- [x] **Resend מוגדר** — דומיין `service.uriyaganor.com`, מפתח שליחה, נמענים.
+- [x] **Gemini מאומת** — מפתח עובד; מודלים: טקסט `gemini-3.1-pro-preview`, תמונות `gemini-3.1-flash-image`.
+- [x] **פריסה ל-Cloudflare** — Worker חי בחשבון info@, כל ה-Secrets מוגדרים, Cron רשום. כתובת זמנית: `seo-dashboard.billowing-cell-206d.workers.dev`.
+- [ ] **שיוך `seo.uriyaganor.com`** — חסום ע"י רשומת DNS קיימת (placeholder "under construction"). דורש הסרת הרשומה בדשבורד Cloudflare (הטוקן של wrangler הוא read-only ל-DNS).
+- [ ] **`SUPABASE_SERVICE_ROLE_KEY`** — נדרש לניטור ה-Cron (המשתמש יספק מ-Supabase → Settings → API).
+- [ ] **בדיקות מקצה-לקצה** — מול אתר WordPress אמיתי (drywall.co.il מוכן: REST+Yoast זוהו).
 
 ### מה נבנה ב-Phases 2–8
 - **WordPress:** קליינט REST מלא (קריאה/כתיבה), הצפנת AES-GCM, אשף הוספת אתר 3 צעדים + סנכרון, mu-plugin ל-Yoast.
