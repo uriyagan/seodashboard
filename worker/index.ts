@@ -48,7 +48,18 @@ app.post("/api/monitor/run", async (c) => {
 });
 
 app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
-app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+
+// SPA fallback: any non-API, non-asset route serves index.html with a 200
+// status so client-side routes (e.g. /login, /reset-password) deep-link cleanly.
+app.all("*", async (c) => {
+  const url = new URL(c.req.url);
+  url.pathname = "/index.html";
+  const res = await c.env.ASSETS.fetch(new Request(url.toString(), { headers: c.req.raw.headers }));
+  return new Response(res.body, {
+    status: 200,
+    headers: { "content-type": res.headers.get("content-type") ?? "text/html; charset=utf-8" },
+  });
+});
 
 export default {
   fetch: app.fetch,
