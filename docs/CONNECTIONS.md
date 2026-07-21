@@ -43,11 +43,11 @@
 ### 3. Resend
 - **תפקיד:** שליחת התראות מייל לאדמינים.
 - **קונקטור:** מחובר (Resend MCP).
-- **משתני סביבה נדרשים:**
-  - `RESEND_API_KEY` (server-side בלבד)
-- **דומיין שליחה:** _ייבדק/יוגדר (למשל domain מאומת תחת uriyaganor.com)._
-- **נמענים:** 2 האדמינים.
-- **סטטוס:** ⏳ ממתין לאימות דומיין/הגדרה.
+- **דומיין שליחה:** `service.uriyaganor.com` — **מאומת** (sending enabled).
+- **כתובת שולח:** `noreply@service.uriyaganor.com` (`RESEND_FROM`).
+- **API key:** נוצר מפתח ייעודי בשם `seo-dashboard`, מוגבל ל-sending בלבד ולדומיין זה. הערך נשמר ב-`.env.local` (dev) — בפרודקשן כ-Worker Secret. **לא נשמר במסמכים/בגיט.**
+- **נמענים:** `info@uriyaganor.com`, `sam@uriyaganor.com` (`ADMIN_EMAILS`).
+- **סטטוס:** ✅ מוגדר (dev). לפרודקשן: `wrangler secret put RESEND_API_KEY`.
 
 ---
 
