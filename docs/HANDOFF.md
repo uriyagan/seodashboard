@@ -65,8 +65,8 @@
 - [x] **Phase 8** — הכנה לפריסה (mu-plugin, DEPLOY.md, wrangler + cron) *(נבנה)*
 - [x] **Resend מוגדר** — דומיין `service.uriyaganor.com`, מפתח שליחה, נמענים.
 - [x] **Gemini מאומת** — מפתח עובד; מודלים: טקסט `gemini-3.1-pro-preview`, תמונות `gemini-3.1-flash-image`.
-- [x] **פריסה ל-Cloudflare** — Worker חי בחשבון info@, כל ה-Secrets מוגדרים, Cron רשום. כתובת זמנית: `seo-dashboard.billowing-cell-206d.workers.dev`.
-- [ ] **שיוך `seo.uriyaganor.com`** — חסום ע"י רשומת DNS קיימת (placeholder "under construction"). דורש הסרת הרשומה בדשבורד Cloudflare (הטוקן של wrangler הוא read-only ל-DNS).
+- [x] **פריסה ל-Cloudflare** — Worker חי בחשבון info@, כל ה-Secrets מוגדרים, Cron רשום.
+- [x] **`seo.uriyaganor.com` חי** — Custom Domain מחובר, SSL פעיל, מגיש את האפליקציה (200 בכל הנתיבים).
 - [ ] **`SUPABASE_SERVICE_ROLE_KEY`** — נדרש לניטור ה-Cron (המשתמש יספק מ-Supabase → Settings → API).
 - [ ] **בדיקות מקצה-לקצה** — מול אתר WordPress אמיתי (drywall.co.il מוכן: REST+Yoast זוהו).
 

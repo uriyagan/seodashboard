@@ -11,6 +11,9 @@
     // falls through to the Worker, which serves index.html (200) for SPA routes.
     "not_found_handling": "none"
   },
+  "routes": [
+    { "pattern": "seo.uriyaganor.com", "custom_domain": true }
+  ],
   "observability": {
     "enabled": true
   },
