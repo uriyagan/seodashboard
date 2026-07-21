@@ -43,7 +43,7 @@
 - **דומיין:** `seo.uriyaganor.com`.
 - **גישה:** אדמינים בלבד, 2 משתמשים (Supabase Auth + allowlist).
 - **Backend:** Next.js **API Routes** משמשות כשכבת שרת מאובטחת — כל הקריאות לשירותים החיצוניים (Gemini, Resend, WordPress, service-role של Supabase) עוברות דרך השרת בלבד. מפתחות ה-API לעולם לא נחשפים ללקוח.
-- **UI:** Tailwind + shadcn/ui. **עורך:** TipTap (HTML נקי תואם WordPress).
+- **UI:** Tailwind + shadcn/ui, **עברית מלאה + RTL** (`dir="rtl"`, `lang="he"`), עיצוב SaaS מודרני ונקי, גופן עברי (Assistant/Heebo), תמיכת Light/Dark ו-Responsive. **עורך:** TipTap (HTML נקי תואם WordPress).
 
 ### 2. Supabase — נתונים, אימות ואחסון
 - **DB (Postgres):** projects (כולל `content_prompt` + `image_prompt` per-לקוח), posts, ideas, images, admins, settings.

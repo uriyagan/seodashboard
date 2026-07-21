@@ -33,7 +33,7 @@
 | שכבה | טכנולוגיה | נימוק |
 |------|-----------|--------|
 | Frontend | **React + Vite + TypeScript** (SPA) | דאשבורד אדמין מאחורי אימות — לא נדרש SSR/SEO; SPA מהיר ופשוט על Cloudflare |
-| UI | Tailwind CSS + shadcn/ui | מהיר, נקי, נגיש |
+| UI | Tailwind CSS + shadcn/ui (**RTL, עברית מלאה**) | מהיר, נקי, נגיש; עיצוב SaaS מודרני |
 | עורך טקסט | **TipTap** (מפיק HTML נקי תואם WordPress) | פתרון ריאלי לעורך "כמו WP" בלי לשכפל את Gutenberg |
 | Backend / API | **Cloudflare Workers + Hono** | Workers כפי שביקש המשתמש; Hono = ראוטר קליל ל-API; סודות כ-Worker Secrets |
 | DB + Auth + Storage | **Supabase** | קונקטור זמין |
@@ -44,6 +44,21 @@
 | גיבוי קוד | **GitHub** — `github.com/uriyagan/seodashboard` | קומיטים שוטפים |
 
 **חלוקת פריסה:** ה-SPA מוגש כ-Static Assets מה-Worker; אותו Worker (Hono) חושף `/api/*` שמתווך מול Supabase (service-role), Gemini, Resend ו-WordPress. כל הסודות = Worker Secrets.
+
+---
+
+## 2b. עקרונות עיצוב וממשק (UI/UX)
+
+- **שפה:** עברית מלאה בכל הממשק (טקסטים, כפתורים, הודעות, שגיאות).
+- **כיווניות:** **RTL** מלא — `dir="rtl"`, `lang="he"`, פריסה מימין לשמאל בכל הרכיבים (כולל טבלאות, טפסים, סיידבר, אייקונים ופדינגים).
+- **סגנון:** SaaS עכשווי — מודרני, נקי, מרווח. היררכיה ברורה, whitespace נדיב, פינות מעוגלות, צללים עדינים.
+- **מערכת עיצוב:** Tailwind CSS + shadcn/ui (מותאם RTL), טוקנים אחידים לצבע/טיפוגרפיה/מרווח.
+- **טיפוגרפיה:** גופן עברי מודרני וקריא (למשל Assistant / Heebo / Rubik).
+- **מצבי תצוגה:** תמיכה ב-Light/Dark (רצוי), Responsive מלא.
+- **חוויית שימוש:** מצבי טעינה (skeletons), הודעות toast, אישורי פעולה, ומצבי ריק (empty states) ידידותיים.
+- **נגישות:** ניגודיות תקינה, ניווט מקלדת, תוויות ARIA.
+
+> יעד תחושתי: כלי עבודה יומיומי שנעים ומהיר לעבוד איתו — לא "טופס", אלא מוצר.
 
 ---
 
