@@ -46,7 +46,7 @@
 - **UI:** Tailwind + shadcn/ui. **עורך:** TipTap (HTML נקי תואם WordPress).
 
 ### 2. Supabase — נתונים, אימות ואחסון
-- **DB (Postgres):** projects, posts, ideas, images, prompts, admins, settings.
+- **DB (Postgres):** projects (כולל `content_prompt` + `image_prompt` per-לקוח), posts, ideas, images, admins, settings.
 - **Auth:** הגבלה ל-2 אדמינים.
 - **Storage:** גיבוי תמונות שנוצרו.
 - **RLS:** גישה לאדמינים המורשים בלבד.
