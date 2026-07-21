@@ -8,7 +8,7 @@ import type { Env } from "../index";
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 export function textModel(env: Env): string {
-  return env.GEMINI_TEXT_MODEL || "gemini-3-pro";
+  return env.GEMINI_TEXT_MODEL || "gemini-3.1-pro-preview";
 }
 export function imageModel(env: Env): string {
   return env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image"; // Nano Banana 2

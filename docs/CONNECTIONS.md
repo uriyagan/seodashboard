@@ -26,7 +26,7 @@
 - **משתני סביבה נדרשים:**
   - `GEMINI_API_KEY` (server-side בלבד)
 - **מודלים (ניתנים לשינוי דרך env):**
-  - טקסט: `gemini-3-pro` (ברירת מחדל; משתנה `GEMINI_TEXT_MODEL`).
+  - טקסט: `gemini-3.1-pro-preview` (ברירת מחדל; משתנה `GEMINI_TEXT_MODEL`). נבדק ועובד.
   - תמונות (Nano Banana 2): `gemini-3.1-flash-image` (משתנה `GEMINI_IMAGE_MODEL`).
 - **דורש:** חשבון Google AI Studio / Google Cloud עם חיוב מופעל למודל התמונות.
 - **סטטוס:** ⏳ ממתין למפתח API.
