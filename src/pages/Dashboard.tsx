@@ -13,7 +13,8 @@ import {
 import { useAuth } from "@/lib/auth";
 import { ProjectsProvider, useProjects } from "@/lib/projects";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
-import { AddProjectDialog } from "@/components/AddProjectDialog";
+import { AddSiteWizard } from "@/components/AddSiteWizard";
+import { PostsList } from "@/components/PostsList";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -179,7 +180,7 @@ function DashboardInner() {
           ) : nav === "overview" ? (
             <Overview />
           ) : nav === "posts" ? (
-            <Placeholder title="פוסטים" />
+            <PostsList />
           ) : nav === "ideas" ? (
             <Placeholder title="רעיונות" />
           ) : (
@@ -187,7 +188,7 @@ function DashboardInner() {
           )}
         </main>
       </div>
-      {addOpen && <AddProjectDialog onClose={() => setAddOpen(false)} />}
+      {addOpen && <AddSiteWizard onClose={() => setAddOpen(false)} />}
     </div>
   );
 }

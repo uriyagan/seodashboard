@@ -1,0 +1,138 @@
+import { useCallback, useEffect, useState } from "react";
+import { FileText, RefreshCw } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
+import { useProjects } from "@/lib/projects";
+import { Button, Card, Spinner } from "@/components/ui";
+import { cn } from "@/lib/utils";
+
+interface PostRow {
+  id: string;
+  wp_post_id: number | null;
+  title: string;
+  wp_status: string;
+  published_at: string | null;
+  pushed_at: string | null;
+  updated_at: string;
+}
+
+const STATUS_HE: Record<string, { label: string; className: string }> = {
+  publish: { label: "פורסם", className: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300" },
+  draft: { label: "טיוטה", className: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300" },
+  pending: { label: "ממתין", className: "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300" },
+  private: { label: "פרטי", className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" },
+  future: { label: "מתוזמן", className: "bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300" },
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const s = STATUS_HE[status] ?? { label: status, className: "bg-gray-100 text-gray-700" };
+  return (
+    <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium", s.className)}>
+      {s.label}
+    </span>
+  );
+}
+
+export function PostsList() {
+  const { activeProject } = useProjects();
+  const [posts, setPosts] = useState<PostRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!activeProject) return;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("posts")
+      .select("id, wp_post_id, title, wp_status, published_at, pushed_at, updated_at")
+      .eq("project_id", activeProject.id)
+      .order("published_at", { ascending: false, nullsFirst: false })
+      .order("updated_at", { ascending: false });
+    if (error) setError(error.message);
+    else setPosts((data ?? []) as PostRow[]);
+    setLoading(false);
+  }, [activeProject]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function resync() {
+    if (!activeProject) return;
+    setSyncing(true);
+    setError(null);
+    try {
+      await api(`/api/projects/${activeProject.id}/sync`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "סנכרון נכשל");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  if (!activeProject) return null;
+
+  return (
+    <div className="p-6">
+      <div className="mb-5 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-[var(--text)]">פוסטים</h1>
+          <p className="text-sm text-[var(--muted)]">{posts.length} פוסטים בפרויקט</p>
+        </div>
+        <Button variant="outline" onClick={resync} loading={syncing}>
+          {!syncing && <RefreshCw className="size-4" />}
+          סנכרון מחדש
+        </Button>
+      </div>
+
+      {error && <p className="mb-4 text-sm text-[var(--color-danger)]">{error}</p>}
+
+      <Card className="overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Spinner className="size-6" />
+          </div>
+        ) : posts.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-16 text-center">
+            <FileText className="size-8 text-[var(--muted)]" />
+            <p className="text-sm text-[var(--muted)]">
+              אין פוסטים עדיין. נסה "סנכרון מחדש" או צור פוסט חדש (בקרוב).
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-[var(--muted)]">
+                  <th className="px-4 py-3 font-medium">כותרת</th>
+                  <th className="px-4 py-3 font-medium">סטטוס</th>
+                  <th className="px-4 py-3 font-medium">תאריך</th>
+                </tr>
+              </thead>
+              <tbody>
+                {posts.map((p) => (
+                  <tr
+                    key={p.id}
+                    className="border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--surface-2)]"
+                  >
+                    <td className="max-w-md truncate px-4 py-3 font-medium text-[var(--text)]">
+                      {p.title || "(ללא כותרת)"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={p.wp_status} />
+                    </td>
+                    <td className="px-4 py-3 text-[var(--muted)]" dir="ltr">
+                      {(p.published_at ?? p.pushed_at)?.slice(0, 10) ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}

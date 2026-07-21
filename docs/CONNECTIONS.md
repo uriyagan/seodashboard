@@ -108,8 +108,15 @@ ENCRYPTION_KEY=
 
 ## מיפוי Endpoints / API פנימי
 
-_ימולא ככל שייבנה ה-Backend._
+> כל ה-endpoints תחת `/api/*` מוגשים ע"י Cloudflare Worker (Hono), דורשים Bearer token של Supabase, ומאמתים `is_admin()`.
 
-| Endpoint | Method | תיאור | שירותים בשימוש |
-|----------|--------|--------|----------------|
-| _TBD_ | | | |
+| Endpoint | Method | תיאור | שירותים |
+|----------|--------|--------|----------|
+| `/api/health` | GET | בדיקת חיים | — |
+| `/api/projects/check-url` | POST | בדיקת זמינות `/wp-json` (שלב 1 באשף) | WordPress |
+| `/api/projects/test-connection` | POST | אימות Application Password + זיהוי Yoast (שלב 2) | WordPress |
+| `/api/projects/connect` | POST | יצירת פרויקט (סיסמה מוצפנת AES-GCM) + סנכרון מיידי (שלב 3) | WordPress, Supabase |
+| `/api/projects/:id/sync` | POST | סנכרון מחדש של פוסטים/טקסונומיות | WordPress, Supabase |
+
+**הצפנת סודות WP:** ה-Application Password מוצפן ב-Worker (AES-GCM, `ENCRYPTION_KEY`) ונשמר כ-ciphertext ב-`projects.wp_app_password_encrypted`. פענוח מתבצע רק בצד השרת בעת סנכרון.
+**אימות API:** ה-Frontend שולח את ה-access token של Supabase; ה-Worker פונה ל-Supabase עם ה-token (RLS חל) ומאמת `is_admin()`.

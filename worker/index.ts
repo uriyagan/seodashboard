@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { projects } from "./routes/projects";
 
 /**
  * Cloudflare Worker — API layer (Hono).
@@ -11,6 +12,7 @@ import { Hono } from "hono";
 export interface Env {
   ASSETS: Fetcher;
   SUPABASE_URL?: string;
+  SUPABASE_ANON_KEY?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   GEMINI_API_KEY?: string;
   RESEND_API_KEY?: string;
@@ -24,8 +26,10 @@ app.get("/api/health", (c) =>
   c.json({ ok: true, service: "seo-dashboard-api", ts: new Date().toISOString() })
 );
 
+// Phase 2 — WordPress connection, add-site wizard, sync.
+app.route("/", projects);
+
 // Placeholder groups — implemented in later phases:
-//   /api/projects/*   — WordPress connection + sync (Phase 2)
 //   /api/ai/*         — Gemini text + Nano Banana 2 images (Phase 4–5)
 //   /api/ideas/*      — idea engine (Phase 6)
 //   /api/notify/*     — Resend + cron monitoring (Phase 7)
