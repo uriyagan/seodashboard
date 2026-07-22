@@ -2,29 +2,64 @@ import { Hono } from "hono";
 import type { Env } from "../index";
 import { requireAdmin } from "../lib/supabase";
 import { loadProject, projectAuth } from "../lib/project";
-import { generateArticle, generateImage, suggestInternalLinks } from "../lib/gemini";
+import {
+  generateArticle,
+  generateImage,
+  suggestInternalLinks,
+  pickCategoryForTitle,
+} from "../lib/gemini";
 import { uploadMedia } from "../lib/wordpress";
+import { loadProducts, eligibleCategories, topProductsForCategory } from "../lib/products";
 
 export const ai = new Hono<{ Bindings: Env }>();
 
-/** Generate a full article with Gemini using the project's content_prompt. */
+/**
+ * Generate a full article with Gemini. When no idea/category was supplied,
+ * the post's title is first matched to the most relevant product category and
+ * its top products, so the content stays catalog-relevant (spec §2.3).
+ */
 ai.post("/api/projects/:id/ai/write", async (c) => {
   const sb = await requireAdmin(c.env, c.req.raw);
   if (!sb) return c.json({ error: "unauthorized" }, 401);
-  const project = await loadProject(sb, c.req.param("id"));
+  const projectId = c.req.param("id");
+  const project = await loadProject(sb, projectId);
   if (!project) return c.json({ error: "project not found" }, 404);
 
-  const { topic } = await c.req.json<{ topic: string }>();
+  const { topic, categoryId } = await c.req.json<{ topic: string; categoryId?: number }>();
   if (!topic?.trim()) return c.json({ ok: false, error: "missing topic" }, 400);
 
   try {
+    // Associate a product category (given, or picked from the title).
+    const [products, catRows] = await Promise.all([
+      loadProducts(sb, projectId),
+      sb.from("link_targets").select("wp_id, title").eq("project_id", projectId).eq("type", "product_cat"),
+    ]);
+    const names = new Map(
+      (catRows.data ?? []).map((t: { wp_id: number; title: string }) => [t.wp_id, t.title])
+    );
+    const eligible = eligibleCategories(products, names, 5);
+
+    let catId: number | null = categoryId ?? null;
+    if (!catId && eligible.length) {
+      catId = await pickCategoryForTitle(c.env, topic.trim(), eligible);
+    }
+    const categoryName = catId ? names.get(catId) ?? null : null;
+    const productNames = catId ? topProductsForCategory(products, catId, 50) : [];
+
     const article = await generateArticle(
       c.env,
       project.content_prompt,
       topic.trim(),
-      project.keywords
+      project.keywords,
+      { categoryName: categoryName ?? undefined, productNames }
     );
-    return c.json({ ok: true, article });
+    return c.json({
+      ok: true,
+      article,
+      category_id: catId,
+      category_name: categoryName,
+      product_names: productNames,
+    });
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : "generate failed" }, 500);
   }

@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   ImagePlus,
+  Maximize2,
   Package,
   Save,
   Sparkles,
+  Trash2,
   Upload,
   UploadCloud,
   Wand2,
@@ -42,6 +44,9 @@ interface EditorState {
   featured_media: number | null;
   categories: Term[];
   tags: Term[];
+  product_category_id: number | null;
+  product_category_name: string | null;
+  product_names: string[];
 }
 
 const BLANK: EditorState = {
@@ -57,6 +62,9 @@ const BLANK: EditorState = {
   featured_media: null,
   categories: [],
   tags: [],
+  product_category_id: null,
+  product_category_name: null,
+  product_names: [],
 };
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -86,6 +94,11 @@ export function PostEditor({
     mimeType: string;
     preview: string;
   } | null>(null);
+  const [lightbox, setLightbox] = useState(false);
+
+  function removeFeatured() {
+    setState((s) => ({ ...s, featured_image_url: "", featured_media: null }));
+  }
 
   const set = <K extends keyof EditorState>(k: K, v: EditorState[K]) =>
     setState((s) => ({ ...s, [k]: v }));
@@ -157,6 +170,9 @@ export function PostEditor({
           featured_media: featuredMedia,
           categories: (data.categories ?? []) as Term[],
           tags: (data.tags ?? []) as Term[],
+          product_category_id: (data.product_category_id as number | null) ?? null,
+          product_category_name: (data.product_category_name as string | null) ?? null,
+          product_names: (data.product_names as string[] | null) ?? [],
         });
       }
       setLoading(false);
@@ -180,6 +196,9 @@ export function PostEditor({
       tags: state.tags,
       wp_status: state.status,
       local_status: "editing",
+      product_category_id: state.product_category_id,
+      product_category_name: state.product_category_name,
+      product_names: state.product_names,
     };
     const { data, error } = await supabase.from("posts").upsert(row).select("id").single();
     if (error) throw error;
@@ -244,18 +263,25 @@ export function PostEditor({
     setError(null);
     setNotice(null);
     try {
-      const r = await api<{ ok: boolean; article?: EditorState; error?: string }>(
-        `/api/projects/${activeProject!.id}/ai/write`,
-        { topic: state.title.trim() }
-      );
+      const r = await api<{
+        ok: boolean;
+        article?: {
+          title: string;
+          content_html: string;
+          focus_keyword: string;
+          seo_title: string;
+          meta_description: string;
+        };
+        category_id?: number | null;
+        category_name?: string | null;
+        product_names?: string[];
+        error?: string;
+      }>(`/api/projects/${activeProject!.id}/ai/write`, {
+        topic: state.title.trim(),
+        categoryId: state.product_category_id ?? undefined,
+      });
       if (!r.ok || !r.article) throw new Error(r.error || "יצירת התוכן נכשלה");
-      const a = r.article as unknown as {
-        title: string;
-        content_html: string;
-        focus_keyword: string;
-        seo_title: string;
-        meta_description: string;
-      };
+      const a = r.article;
       setState((s) => ({
         ...s,
         title: a.title || s.title,
@@ -263,8 +289,13 @@ export function PostEditor({
         focus_keyword: a.focus_keyword,
         seo_title: a.seo_title,
         meta_description: a.meta_description,
+        product_category_id: r.category_id ?? s.product_category_id,
+        product_category_name: r.category_name ?? s.product_category_name,
+        product_names: r.product_names ?? s.product_names,
       }));
-      setNotice("התוכן נוצר עם Gemini ✓");
+      setNotice(
+        r.category_name ? `התוכן נוצר עם Gemini · קטגוריה: ${r.category_name} ✓` : "התוכן נוצר עם Gemini ✓"
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "יצירת התוכן נכשלה");
     } finally {
@@ -398,6 +429,12 @@ export function PostEditor({
               placeholder="כותרת הפוסט"
               className="h-14 !text-xl font-bold"
             />
+            {state.product_category_name && (
+              <span className="flex w-fit items-center gap-1 rounded-md bg-[var(--surface-2)] px-2.5 py-1 text-xs text-[var(--muted)]">
+                <Package className="size-3.5" />
+                קטגוריית מוצרים: {state.product_category_name}
+              </span>
+            )}
             <Button variant="outline" onClick={onWriteAI} loading={busy === "write"} className="w-full">
               <Wand2 className="size-4" />
               כתוב את הפוסט עם Gemini (לפי הכותרת)
@@ -416,11 +453,32 @@ export function PostEditor({
             <Card className="p-4">
               <h3 className="mb-3 text-sm font-semibold text-[var(--text)]">תמונה ראשית</h3>
               {state.featured_image_url ? (
-                <img
-                  src={state.featured_image_url}
-                  alt="תמונה ראשית"
-                  className="mb-3 w-full rounded-lg border border-[var(--border)]"
-                />
+                <div className="group relative mb-3">
+                  <img
+                    src={state.featured_image_url}
+                    alt="תמונה ראשית"
+                    onClick={() => setLightbox(true)}
+                    className="w-full cursor-zoom-in rounded-lg border border-[var(--border)]"
+                  />
+                  <div className="absolute left-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <button
+                      onClick={() => setLightbox(true)}
+                      className="flex size-8 items-center justify-center rounded-lg bg-black/60 text-white hover:bg-black/80"
+                      title="הגדלה"
+                      aria-label="הגדלת התמונה"
+                    >
+                      <Maximize2 className="size-4" />
+                    </button>
+                    <button
+                      onClick={removeFeatured}
+                      className="flex size-8 items-center justify-center rounded-lg bg-black/60 text-white hover:bg-black/80"
+                      title="הסרת התמונה"
+                      aria-label="הסרת התמונה"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="mb-3 flex h-32 items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-[var(--muted)]">
                   <ImagePlus className="size-6" />
@@ -559,6 +617,27 @@ export function PostEditor({
           </div>
         </div>
       </div>
+
+      {/* Featured-image lightbox */}
+      {lightbox && state.featured_image_url && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+          onClick={() => setLightbox(false)}
+        >
+          <img
+            src={state.featured_image_url}
+            alt="תמונה ראשית"
+            className="max-h-full max-w-full rounded-lg"
+          />
+          <button
+            onClick={() => setLightbox(false)}
+            className="absolute right-4 top-4 flex size-10 items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20"
+            aria-label="סגירה"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

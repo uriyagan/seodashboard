@@ -314,6 +314,46 @@ export async function generateCategoryIdeas(
   }
 }
 
+/**
+ * Picks the most relevant product category for a post title (spec §2.3),
+ * from the given eligible categories. Returns the category id, or null.
+ */
+export async function pickCategoryForTitle(
+  env: Env,
+  title: string,
+  categories: { id: number; name: string }[]
+): Promise<number | null> {
+  if (!categories.length) return null;
+  const prompt = [
+    "בחר את קטגוריית המוצרים הרלוונטית ביותר לכותרת המאמר הבאה, מתוך הרשימה.",
+    `כותרת המאמר: ${title}`,
+    "קטגוריות:",
+    categories.map((c) => `- category_id ${c.id} · "${c.name}"`).join("\n"),
+    "החזר JSON: { category_id: <number> } — המזהה של הקטגוריה המתאימה ביותר בלבד.",
+  ].join("\n");
+
+  const data = await callGemini(env, textModel(env), {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "object",
+        properties: { category_id: { type: "number" } },
+        required: ["category_id"],
+      },
+      temperature: 0.1,
+    },
+  });
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) return null;
+  try {
+    const id = (JSON.parse(text) as { category_id: number }).category_id;
+    return categories.some((c) => c.id === id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface GeneratedImage {
   base64: string;
   mimeType: string;
