@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Sparkles } from "lucide-react";
+import { Logo } from "@/components/Logo";
 
 /** Centered branded shell for auth screens (login / reset). */
 export function AuthShell({
@@ -8,19 +8,19 @@ export function AuthShell({
   children,
   footer,
 }: {
-  title: string;
+  title?: string;
   subtitle?: string;
   children: ReactNode;
   footer?: ReactNode;
 }) {
   return (
-    <div className="flex min-h-full items-center justify-center bg-[var(--bg)] p-4">
+    <div className="flex min-h-full items-center justify-center bg-[var(--bg)] p-[60px]">
       <div className="w-full max-w-[400px]">
         <div className="mb-8 flex flex-col items-center text-center">
-          <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-[var(--brand)] text-[var(--brand-fg)] shadow-sm">
-            <Sparkles className="size-6" />
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">{title}</h1>
+          <Logo className="mb-5 h-6 w-auto text-[var(--text)]" />
+          {title && (
+            <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">{title}</h1>
+          )}
           {subtitle && <p className="mt-1.5 text-sm text-[var(--muted)]">{subtitle}</p>}
         </div>
 

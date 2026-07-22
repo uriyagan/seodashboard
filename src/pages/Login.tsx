@@ -32,7 +32,7 @@ export function LoginPage() {
   }
 
   return (
-    <AuthShell title="SEO Dashboard" subtitle="התחברות למערכת">
+    <AuthShell subtitle="התחברות למערכת">
       <form onSubmit={onSubmit} className="space-y-4">
         {error && <Alert>{error}</Alert>}
 

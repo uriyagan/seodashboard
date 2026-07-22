@@ -5,12 +5,12 @@ import {
   LayoutDashboard,
   LogOut,
   Settings,
-  Sparkles,
   Plus,
   Globe,
   CalendarClock,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { Logo } from "@/components/Logo";
 import { ProjectsProvider, useProjects } from "@/lib/projects";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { AddSiteWizard } from "@/components/AddSiteWizard";
@@ -48,12 +48,9 @@ function Sidebar({
   const { user, signOut } = useAuth();
   return (
     <aside className="flex w-64 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)]">
-      {/* Logo (placeholder until the logo file is added) */}
-      <div className="flex h-[76px] shrink-0 items-center gap-2.5 border-b border-[var(--border)] px-5">
-        <div className="flex size-8 items-center justify-center rounded-lg bg-[var(--brand)] text-[var(--brand-fg)]">
-          <Sparkles className="size-5" />
-        </div>
-        <span className="text-base font-semibold text-[var(--text)]">SEO Dashboard</span>
+      {/* Logo */}
+      <div className="flex h-[76px] shrink-0 items-center border-b border-[var(--border)] px-5">
+        <Logo className="h-5 w-auto text-[var(--text)]" />
       </div>
 
       {/* Nav */}
