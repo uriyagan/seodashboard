@@ -17,7 +17,7 @@ export function AuthShell({
     <div className="flex min-h-full items-center justify-center bg-[var(--bg)] p-4">
       <div className="w-full max-w-[400px]">
         <div className="mb-8 flex flex-col items-center text-center">
-          <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-[var(--brand)] text-white shadow-lg shadow-[var(--brand)]/30">
+          <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-[var(--brand)] text-[var(--brand-fg)] shadow-sm">
             <Sparkles className="size-6" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">{title}</h1>

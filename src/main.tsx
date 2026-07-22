@@ -1,4 +1,3 @@
-import "@fontsource-variable/assistant";
 import "./index.css";
 
 import { StrictMode } from "react";

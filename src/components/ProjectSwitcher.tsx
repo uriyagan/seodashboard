@@ -3,7 +3,13 @@ import { Check, ChevronDown, Globe, Plus } from "lucide-react";
 import { useProjects } from "@/lib/projects";
 import { cn } from "@/lib/utils";
 
-export function ProjectSwitcher({ onAdd }: { onAdd: () => void }) {
+export function ProjectSwitcher({
+  onAdd,
+  openUp = false,
+}: {
+  onAdd: () => void;
+  openUp?: boolean;
+}) {
   const { projects, activeProject, setActiveId } = useProjects();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -20,7 +26,7 @@ export function ProjectSwitcher({ onAdd }: { onAdd: () => void }) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex h-10 min-w-52 items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm font-medium text-[var(--text)] transition-colors hover:bg-[var(--surface-2)]"
+        className="flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm font-medium text-[var(--text)] transition-colors hover:bg-[var(--surface-2)]"
       >
         <span className="flex items-center gap-2 truncate">
           <Globe className="size-4 shrink-0 text-[var(--muted)]" />
@@ -30,7 +36,12 @@ export function ProjectSwitcher({ onAdd }: { onAdd: () => void }) {
       </button>
 
       {open && (
-        <div className="absolute top-12 right-0 z-40 w-72 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl">
+        <div
+          className={cn(
+            "absolute right-0 z-40 w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl",
+            openUp ? "bottom-12" : "top-12"
+          )}
+        >
           <div className="max-h-72 overflow-y-auto">
             {projects.length === 0 && (
               <p className="px-3 py-6 text-center text-sm text-[var(--muted)]">

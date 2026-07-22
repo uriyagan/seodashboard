@@ -35,17 +35,29 @@ const NAV: { key: NavKey; label: string; icon: typeof LayoutDashboard }[] = [
   { key: "settings", label: "הגדרות", icon: Settings },
 ];
 
-function Sidebar({ active, onNavigate }: { active: NavKey; onNavigate: (k: NavKey) => void }) {
+/** Right sidebar: logo, nav, and (bottom) project switcher + theme + logout. */
+function Sidebar({
+  active,
+  onNavigate,
+  onAdd,
+}: {
+  active: NavKey;
+  onNavigate: (k: NavKey) => void;
+  onAdd: () => void;
+}) {
+  const { user, signOut } = useAuth();
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="mb-6 flex items-center gap-2.5 px-2">
-        <div className="flex size-9 items-center justify-center rounded-xl bg-[var(--brand)] text-white">
+    <aside className="flex w-64 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)]">
+      {/* Logo (placeholder until the logo file is added) */}
+      <div className="flex h-[76px] shrink-0 items-center gap-2.5 border-b border-[var(--border)] px-5">
+        <div className="flex size-8 items-center justify-center rounded-lg bg-[var(--brand)] text-[var(--brand-fg)]">
           <Sparkles className="size-5" />
         </div>
-        <span className="text-base font-bold text-[var(--text)]">SEO Dashboard</span>
+        <span className="text-base font-semibold text-[var(--text)]">SEO Dashboard</span>
       </div>
 
-      <nav className="flex flex-col gap-1">
+      {/* Nav */}
+      <nav className="flex flex-1 flex-col gap-1 p-3">
         {NAV.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -53,7 +65,7 @@ function Sidebar({ active, onNavigate }: { active: NavKey; onNavigate: (k: NavKe
             className={cn(
               "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
               active === key
-                ? "bg-[var(--brand-soft)] text-[var(--brand)]"
+                ? "bg-[var(--brand-soft)] text-[var(--text)]"
                 : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
             )}
           >
@@ -62,42 +74,56 @@ function Sidebar({ active, onNavigate }: { active: NavKey; onNavigate: (k: NavKe
           </button>
         ))}
       </nav>
+
+      {/* Bottom controls */}
+      <div className="space-y-2 border-t border-[var(--border)] p-3">
+        <ProjectSwitcher onAdd={onAdd} openUp />
+        <div className="flex items-center justify-between px-1">
+          <span className="truncate text-xs text-[var(--muted)]" dir="ltr">
+            {user?.email}
+          </span>
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <button
+              onClick={() => void signOut()}
+              className="flex size-9 items-center justify-center rounded-lg text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
+              aria-label="התנתקות"
+              title="התנתקות"
+            >
+              <LogOut className="size-[18px]" />
+            </button>
+          </div>
+        </div>
+      </div>
     </aside>
   );
 }
 
-function Topbar({ onAdd }: { onAdd: () => void }) {
-  const { user, signOut } = useAuth();
+/** Top bar header — page title + active project context. */
+function Topbar({ nav }: { nav: NavKey }) {
+  const { activeProject } = useProjects();
+  const label = NAV.find((n) => n.key === nav)?.label ?? "";
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-6">
-      <ProjectSwitcher onAdd={onAdd} />
-      <div className="flex items-center gap-2">
-        <ThemeToggle />
-        <div className="mx-1 h-6 w-px bg-[var(--border)]" />
-        <span className="hidden text-sm text-[var(--muted)] sm:block" dir="ltr">
-          {user?.email}
-        </span>
-        <button
-          onClick={() => void signOut()}
-          className="flex size-9 items-center justify-center rounded-lg text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--color-danger)]"
-          aria-label="התנתקות"
-          title="התנתקות"
-        >
-          <LogOut className="size-[18px]" />
-        </button>
-      </div>
+    <header className="flex h-[76px] shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-[60px]">
+      <h1 className="text-lg font-semibold text-[var(--text)]">{label}</h1>
+      {activeProject && (
+        <>
+          <span className="text-[var(--border)]">|</span>
+          <span className="text-sm text-[var(--muted)]">{activeProject.name}</span>
+        </>
+      )}
     </header>
   );
 }
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="flex flex-1 items-center justify-center p-8">
+    <div className="flex flex-1 items-center justify-center p-[60px]">
       <div className="flex max-w-sm flex-col items-center text-center">
-        <div className="mb-5 flex size-16 items-center justify-center rounded-2xl bg-[var(--brand-soft)] text-[var(--brand)]">
+        <div className="mb-5 flex size-16 items-center justify-center rounded-2xl bg-[var(--surface-2)] text-[var(--text)]">
           <Globe className="size-8" />
         </div>
-        <h2 className="mb-2 text-xl font-bold text-[var(--text)]">ברוך הבא 👋</h2>
+        <h2 className="mb-2 text-xl font-semibold text-[var(--text)]">ברוך הבא 👋</h2>
         <p className="mb-6 text-sm text-[var(--muted)]">
           עדיין לא חובר אף אתר. הוסף את הלקוח הראשון כדי להתחיל לנהל פוסטים,
           תוכן ותמונות.
@@ -115,15 +141,14 @@ function Overview() {
   const { activeProject } = useProjects();
   if (!activeProject) return null;
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-[var(--text)]">{activeProject.name}</h1>
+    <div className="p-[60px]">
+      <div className="mb-8">
         <a
           href={activeProject.site_url}
           target="_blank"
           rel="noreferrer"
           dir="ltr"
-          className="text-sm text-[var(--brand)] hover:underline"
+          className="text-sm text-[var(--muted)] hover:text-[var(--text)] hover:underline"
         >
           {activeProject.site_url}
         </a>
@@ -140,17 +165,10 @@ function Overview() {
               <span className="text-sm text-[var(--muted)]">{label}</span>
               <Icon className="size-5 text-[var(--muted)]" />
             </div>
-            <p className="mt-2 text-2xl font-bold text-[var(--text)]">{value}</p>
+            <p className="mt-2 text-2xl font-semibold text-[var(--text)]">{value}</p>
           </Card>
         ))}
       </div>
-
-      <Card className="mt-6 p-5">
-        <p className="text-sm text-[var(--muted)]">
-          חיבור WordPress, עורך הפוסטים, יצירת תוכן ותמונות עם AI ומנוע הרעיונות —
-          ייבנו בשלבים הבאים.
-        </p>
-      </Card>
     </div>
   );
 }
@@ -159,7 +177,6 @@ function DashboardInner() {
   const { projects, loading } = useProjects();
   const [nav, setNavState] = useState<NavKey>("overview");
   const [addOpen, setAddOpen] = useState(false);
-  // editing = null (not editing) | { postId: string | null } (null = new post)
   const [editing, setEditing] = useState<{ postId: string | null } | null>(null);
   const [listKey, setListKey] = useState(0);
 
@@ -167,14 +184,12 @@ function DashboardInner() {
     setEditing(null);
     setNavState(k);
   }
-
   function openEditor(postId: string | null) {
     setEditing({ postId });
   }
-
   function closeEditor() {
     setEditing(null);
-    setListKey((k) => k + 1); // refresh lists after returning
+    setListKey((k) => k + 1);
   }
 
   function renderContent() {
@@ -203,11 +218,13 @@ function DashboardInner() {
     }
   }
 
+  const showTopbar = editing === null && projects.length > 0;
+
   return (
     <div className="flex h-full">
-      <Sidebar active={nav} onNavigate={setNav} />
+      <Sidebar active={nav} onNavigate={setNav} onAdd={() => setAddOpen(true)} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onAdd={() => setAddOpen(true)} />
+        {showTopbar && <Topbar nav={nav} />}
         <main className="flex-1 overflow-y-auto bg-[var(--bg)]">
           {loading ? (
             <div className="flex h-full items-center justify-center">

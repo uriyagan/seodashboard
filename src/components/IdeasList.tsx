@@ -77,7 +77,7 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
   if (!activeProject) return null;
 
   return (
-    <div className="p-6">
+    <div className="p-[60px]">
       <div className="mb-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--text)]">רעיונות לפוסטים</h1>

@@ -237,7 +237,7 @@ export function PostEditor({
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-6 py-3">
+      <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-[60px] py-4">
         <button
           onClick={onBack}
           className="flex items-center gap-1.5 text-sm font-medium text-[var(--muted)] hover:text-[var(--text)]"
@@ -258,7 +258,7 @@ export function PostEditor({
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-[60px]">
         {error && <div className="mb-4"><Alert>{error}</Alert></div>}
         {notice && <div className="mb-4"><Alert variant="success">{notice}</Alert></div>}
 

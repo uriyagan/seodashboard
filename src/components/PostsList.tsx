@@ -16,18 +16,25 @@ interface PostRow {
   updated_at: string;
 }
 
-const STATUS_HE: Record<string, { label: string; className: string }> = {
-  publish: { label: "פורסם", className: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300" },
-  draft: { label: "טיוטה", className: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300" },
-  pending: { label: "ממתין", className: "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300" },
-  private: { label: "פרטי", className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" },
-  future: { label: "מתוזמן", className: "bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300" },
+const STATUS_HE: Record<string, { label: string; solid?: boolean }> = {
+  publish: { label: "פורסם", solid: true },
+  draft: { label: "טיוטה" },
+  pending: { label: "ממתין" },
+  private: { label: "פרטי" },
+  future: { label: "מתוזמן" },
 };
 
 function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_HE[status] ?? { label: status, className: "bg-gray-100 text-gray-700" };
+  const s = STATUS_HE[status] ?? { label: status };
   return (
-    <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium", s.className)}>
+    <span
+      className={cn(
+        "rounded-full px-2.5 py-0.5 text-xs font-medium",
+        s.solid
+          ? "bg-[var(--brand)] text-[var(--brand-fg)]"
+          : "border border-[var(--border)] text-[var(--muted)]"
+      )}
+    >
       {s.label}
     </span>
   );
@@ -81,7 +88,7 @@ export function PostsList({
   if (!activeProject) return null;
 
   return (
-    <div className="p-6">
+    <div className="p-[60px]">
       <div className="mb-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--text)]">פוסטים</h1>

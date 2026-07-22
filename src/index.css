@@ -4,27 +4,43 @@
    so a dark OS never leaks dark: styles into the light theme (and vice versa). */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/* ---- Google Sans (self-hosted variable font, Latin + Hebrew) ---- */
+@font-face {
+  font-family: "Google Sans";
+  src: url("/fonts/GoogleSans.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Google Sans";
+  src: url("/fonts/GoogleSans-Italic.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 /* ============================================================
-   Design tokens — modern clean SaaS, light + dark
+   Design tokens — monochrome (black / white / grey)
    ============================================================ */
 @theme {
-  --font-sans: "Assistant Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Google Sans", ui-sans-serif, system-ui, sans-serif;
 
-  --color-bg: #f7f8fa;
+  --color-bg: #f5f5f5;
   --color-surface: #ffffff;
-  --color-surface-2: #f2f4f7;
-  --color-border: #e4e7ec;
-  --color-text: #101828;
-  --color-muted: #667085;
+  --color-surface-2: #f0f0f0;
+  --color-border: #e4e4e7;
+  --color-text: #0a0a0a;
+  --color-muted: #71717a;
 
-  --color-brand: #6c5ce7;
-  --color-brand-hover: #5a4bd4;
-  --color-brand-soft: #eeecfb;
+  --color-brand: #111111;
+  --color-brand-hover: #000000;
+  --color-brand-soft: #f0f0f0;
   --color-brand-fg: #ffffff;
 
-  --color-success: #12b76a;
-  --color-warning: #f79009;
-  --color-danger: #f04438;
+  --color-success: #16a34a;
+  --color-warning: #ca8a04;
+  --color-danger: #dc2626;
 
   --radius-lg: 0.875rem;
 }
@@ -42,20 +58,22 @@
   --brand: var(--color-brand);
   --brand-hover: var(--color-brand-hover);
   --brand-soft: var(--color-brand-soft);
+  --brand-fg: var(--color-brand-fg);
 }
 
 :root[data-theme="dark"],
 html.dark {
   color-scheme: dark;
-  --bg: #0f1117;
-  --surface: #171922;
-  --surface-2: #1f2230;
-  --border: #2a2e3d;
-  --text: #e7e9ee;
-  --muted: #98a2b3;
-  --brand: #7c6cf0;
-  --brand-hover: #8f80f5;
-  --brand-soft: #23213a;
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --surface-2: #1f1f1f;
+  --border: #2a2a2a;
+  --text: #f5f5f5;
+  --muted: #a1a1aa;
+  --brand: #ffffff;
+  --brand-hover: #e5e5e5;
+  --brand-soft: #262626;
+  --brand-fg: #0a0a0a;
 }
 
 * {

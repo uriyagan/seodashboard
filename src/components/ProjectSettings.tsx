@@ -84,7 +84,7 @@ export function ProjectSettings() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <div className="mx-auto max-w-3xl p-[60px]">
       <h1 className="mb-1 text-2xl font-bold text-[var(--text)]">הגדרות פרויקט</h1>
       <p className="mb-6 text-sm text-[var(--muted)]" dir="ltr">{activeProject.site_url}</p>
 
