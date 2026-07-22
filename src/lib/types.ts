@@ -11,6 +11,7 @@ export interface Project {
   last_post_at: string | null;
   yoast_ready: boolean;
   companion_token: string | null;
+  gsc_property: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

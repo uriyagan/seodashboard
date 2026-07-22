@@ -98,6 +98,13 @@ RESEND_API_KEY=
 
 # הצפנת סודות WordPress (Worker Secret)
 ENCRYPTION_KEY=
+
+# Google Search Console OAuth (Worker Secret)
+# Google Cloud project: "Default Gemini Project" (gen-lang-client-0850237732)
+# Redirect URI רשום: https://seo.uriyaganor.com/api/gsc/callback
+# Scopes: openid email webmasters.readonly
+GSC_CLIENT_ID=
+GSC_CLIENT_SECRET=
 ```
 
 > בפרודקשן הסודות (השורות ללא `VITE_`) נשמרים כ-**Cloudflare Worker Secrets** ולא בקובץ.
@@ -126,6 +133,13 @@ ENCRYPTION_KEY=
 | `/api/projects/:id/ideas/generate` | POST | 10 רעיונות מ-Gemini לפי כותרות קיימות | Gemini, Supabase |
 | `/api/projects/:id/ideas/:ideaId/write` | POST | כתיבת פוסט מרעיון (מאמר+תמונה) → טיוטה מקומית | Gemini, WordPress, Supabase |
 | `/api/monitor/run` | POST | הרצת ניטור הקצב ידנית (זהה ל-Cron) | Supabase, Resend |
+| `/api/gsc/authorize` | GET | בניית כתובת ההסכמה של Google (OAuth) | Google OAuth |
+| `/api/gsc/callback` | GET | חזרה מ-Google → ניתוב ל-SPA עם code+state | — |
+| `/api/gsc/exchange` | POST | חילוף code ל-tokens ושמירה מוצפנת (per-admin) | Google OAuth, Supabase |
+| `/api/gsc/status` | GET | סטטוס חיבור GSC של המנהל הנוכחי | Supabase |
+| `/api/gsc/sites` | GET | רשימת נכסי Search Console של החשבון | Google Search Console |
+| `/api/gsc/disconnect` | POST | ניתוק חיבור GSC של המנהל הנוכחי | Supabase |
+| `/api/projects/:id/gsc/keywords` | GET | מילות מפתח מדורגות (90 ימים) לנכס הפרויקט | Google Search Console |
 | `scheduled` (Cron) | — | ניטור יומי אוטומטי (06:00 UTC) | Supabase, Resend |
 
 **הצפנת סודות WP:** ה-Application Password מוצפן ב-Worker (AES-GCM, `ENCRYPTION_KEY`) ונשמר כ-ciphertext ב-`projects.wp_app_password_encrypted`. פענוח מתבצע רק בצד השרת בעת סנכרון.

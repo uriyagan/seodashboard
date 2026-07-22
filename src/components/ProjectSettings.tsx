@@ -6,6 +6,7 @@ import { useProjects } from "@/lib/projects";
 import { Alert, Button, Card, Input, Label } from "@/components/ui";
 import { CompanionSnippet } from "@/components/CompanionSnippet";
 import { KeywordsInput } from "@/components/KeywordsInput";
+import { GscPanel } from "@/components/GscPanel";
 
 export function ProjectSettings() {
   const { activeProject, reload, setActiveId, projects } = useProjects();
@@ -136,6 +137,22 @@ export function ProjectSettings() {
           </p>
         </div>
         <KeywordsInput value={keywords} onChange={setKeywords} />
+      </Card>
+
+      <Card className="mb-4 space-y-3 p-5">
+        <div>
+          <h2 className="text-base font-semibold text-[var(--text)]">Google Search Console</h2>
+          <p className="text-sm text-[var(--muted)]">
+            שליפת מילות המפתח האמיתיות שהאתר מדורג עליהן — הוסף אותן בלחיצה לרשימת מילות המפתח.
+          </p>
+        </div>
+        <GscPanel
+          project={activeProject}
+          keywords={keywords}
+          onAddKeyword={(kw) =>
+            setKeywords((prev) => (prev.includes(kw) ? prev : [...prev, kw]))
+          }
+        />
       </Card>
 
       <Card className="mb-4 grid gap-4 p-5 sm:grid-cols-2">

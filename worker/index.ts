@@ -4,6 +4,7 @@ import { posts } from "./routes/posts";
 import { ai } from "./routes/ai";
 import { ideas } from "./routes/ideas";
 import { companion } from "./routes/companion";
+import { gsc } from "./routes/gsc";
 import { requireAdmin } from "./lib/supabase";
 import { runMonitor } from "./lib/monitor";
 
@@ -25,6 +26,8 @@ export interface Env {
   ADMIN_EMAILS?: string;
   ENCRYPTION_KEY?: string;
   APP_URL?: string;
+  GSC_CLIENT_ID?: string;
+  GSC_CLIENT_SECRET?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -40,6 +43,7 @@ app.route("/", posts); // Phase 3 — post fetch/push, terms, media
 app.route("/", ai); // Phase 4–5 — Gemini text + Nano Banana 2 images
 app.route("/", ideas); // Phase 6 — idea engine
 app.route("/", companion); // companion queue (firewalled sites)
+app.route("/", gsc); // Google Search Console OAuth + keyword data
 
 // Manual trigger for the monitor (admins only) — same logic the cron runs.
 app.post("/api/monitor/run", async (c) => {

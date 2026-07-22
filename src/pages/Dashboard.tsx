@@ -11,6 +11,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import { Logo } from "@/components/Logo";
 import { ProjectsProvider, useProjects } from "@/lib/projects";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
@@ -196,6 +197,23 @@ function DashboardInner() {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<{ postId: string | null } | null>(null);
   const [listKey, setListKey] = useState(0);
+
+  // Complete the Google Search Console OAuth round-trip: the worker callback
+  // bounces back to "/?gsc_code=…&gsc_state=…"; exchange it, then open Settings.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("gsc_code");
+    const err = params.get("gsc_error");
+    if (!code && !err) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    if (err) {
+      alert(`חיבור Google Search Console נכשל: ${err}`);
+      return;
+    }
+    api("/api/gsc/exchange", { code, state: params.get("gsc_state") })
+      .then(() => setNavState("settings"))
+      .catch((e) => alert(`חיבור Google Search Console נכשל: ${e.message}`));
+  }, []);
 
   function setNav(k: NavKey) {
     setEditing(null);

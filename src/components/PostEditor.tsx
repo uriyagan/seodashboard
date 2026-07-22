@@ -76,20 +76,28 @@ export function PostEditor({
     mimeType: string;
     preview: string;
   } | null>(null);
-  const editorRef = useRef<{
-    selection: { getContent: () => string };
-    insertContent: (html: string) => void;
-  } | null>(null);
 
   const set = <K extends keyof EditorState>(k: K, v: EditorState[K]) =>
     setState((s) => ({ ...s, [k]: v }));
 
-  function insertInternalLink(url: string, title: string) {
-    const ed = editorRef.current;
-    if (!ed) return;
-    const sel = ed.selection.getContent();
-    const text = sel || title;
-    ed.insertContent(`<a href="${url}">${text}</a>`);
+  /** Wrap the first non-linked occurrence of `anchor` in the content with a link. */
+  function applyLinkSuggestion(anchor: string, url: string) {
+    setState((s) => {
+      const parts = s.content_html.split(/(<a\b[^>]*>[\s\S]*?<\/a>)/gi);
+      let done = false;
+      for (let i = 0; i < parts.length && !done; i++) {
+        if (/^<a\b/i.test(parts[i])) continue; // don't touch existing links
+        const idx = parts[i].indexOf(anchor);
+        if (idx !== -1) {
+          parts[i] =
+            parts[i].slice(0, idx) +
+            `<a href="${url}">${anchor}</a>` +
+            parts[i].slice(idx + anchor.length);
+          done = true;
+        }
+      }
+      return done ? { ...s, content_html: parts.join("") } : s;
+    });
   }
 
   // Load existing post (local row; fetch WP content if empty).
@@ -388,7 +396,6 @@ export function PostEditor({
               <RichEditor
                 value={state.content_html}
                 onChange={(html) => set("content_html", html)}
-                onInit={(ed) => (editorRef.current = ed)}
               />
             </div>
           </div>
@@ -519,8 +526,8 @@ export function PostEditor({
             <Card className="p-4">
               <InternalLinks
                 projectId={activeProject.id}
-                context={`${state.seo_title || state.title} ${state.focus_keyword} ${state.content_html}`}
-                onInsert={insertInternalLink}
+                content={state.content_html}
+                onApply={applyLinkSuggestion}
               />
             </Card>
 
