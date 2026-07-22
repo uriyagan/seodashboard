@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
 import { Alert, Button, Card, Input, Label } from "@/components/ui";
+import { CompanionSnippet } from "@/components/CompanionSnippet";
 
 export function ProjectSettings() {
   const { activeProject, reload, setActiveId, projects } = useProjects();
@@ -145,6 +146,20 @@ export function ProjectSettings() {
           />
         </div>
       </Card>
+
+      {activeProject.companion_token && (
+        <Card className="mb-4 space-y-3 p-5">
+          <div>
+            <h2 className="text-base font-semibold text-[var(--text)]">
+              סניפט Companion (לאתרים מאחורי חומת אש)
+            </h2>
+            <p className="text-sm text-[var(--muted)]">
+              אם סנכרון/דחיפה נכשלים בגלל חסימת אבטחה של האחסון — הדבק את הסניפט הזה באתר.
+            </p>
+          </div>
+          <CompanionSnippet token={activeProject.companion_token} />
+        </Card>
+      )}
 
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
