@@ -410,6 +410,68 @@ export async function fetchPages(auth: WpAuth, runner?: CompanionRunner): Promis
   return out;
 }
 
+export interface WpProduct {
+  id: number;
+  name: string;
+  sku: string;
+  stock_status: string;
+  total_sales: number;
+  price: string;
+  date_created: string | null;
+  image_url: string | null;
+  category_ids: number[];
+}
+
+/**
+ * Fetches WooCommerce products via the WC REST API (paginated). Works over the
+ * existing Application Password (admin caps) directly or through the companion
+ * queue (which runs as an administrator). Returns [] if WooCommerce is absent.
+ */
+export async function fetchProducts(
+  auth: WpAuth,
+  runner?: CompanionRunner
+): Promise<WpProduct[]> {
+  const out: WpProduct[] = [];
+  let page = 1;
+  for (;;) {
+    const r = await wpFetch(auth.siteUrl, auth, "/wc/v3/products", {}, {
+      per_page: 100,
+      page,
+      status: "publish",
+      orderby: "date",
+      order: "desc",
+    }, runner);
+    if (r.status >= 400) break; // no WooCommerce, or not permitted
+    let batch: Array<Record<string, unknown>>;
+    try {
+      batch = JSON.parse(r.text);
+    } catch {
+      break;
+    }
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    for (const p of batch) {
+      const images = (p.images as Array<{ src?: string }> | undefined) ?? [];
+      const cats = (p.categories as Array<{ id?: number }> | undefined) ?? [];
+      out.push({
+        id: Number(p.id),
+        name: String(p.name ?? ""),
+        sku: String(p.sku ?? ""),
+        stock_status: String(p.stock_status ?? "instock"),
+        total_sales: Number(p.total_sales ?? 0),
+        price: String(p.price ?? ""),
+        date_created: (p.date_created as string) ?? null,
+        image_url: images[0]?.src ?? null,
+        category_ids: cats.map((c) => Number(c.id)).filter(Boolean),
+      });
+    }
+    const totalPages = Number(r.headers.get("X-WP-TotalPages") ?? "1");
+    if (page >= totalPages) break;
+    page++;
+    if (page > 60) break; // safety cap (~6000 products)
+  }
+  return out;
+}
+
 /** Fetches WooCommerce product terms (product_cat / product_tag) as link targets. */
 export async function fetchProductTerms(
   auth: WpAuth,

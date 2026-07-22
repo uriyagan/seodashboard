@@ -12,6 +12,7 @@ import {
   fetchSyncPayload,
   fetchPages,
   fetchProductTerms,
+  fetchProducts,
   type WpAuth,
   type WpTerm,
   type WpPostSummary,
@@ -81,7 +82,7 @@ async function syncProject(
   projectId: string,
   auth: WpAuth,
   runner?: CompanionRunner
-): Promise<{ posts: number; categories: number; tags: number }> {
+): Promise<{ posts: number; categories: number; tags: number; products: number }> {
   // Prefer the single-call companion sync route (one job for firewalled sites);
   // fall back to the standard multi-call sync for sites without the snippet.
   let categories: WpTerm[];
@@ -170,12 +171,36 @@ async function syncProject(
     await sb.from("link_targets").upsert(linkRows, { onConflict: "project_id,type,wp_id" });
   }
 
+  // 4. WooCommerce products (for idea/content generation). Absent → skipped.
+  const products = await fetchProducts(auth, runner);
+  if (products.length) {
+    const productRows = products.map((p) => ({
+      project_id: projectId,
+      wp_id: p.id,
+      name: decodeEntities(p.name),
+      sku: p.sku,
+      stock_status: p.stock_status,
+      total_sales: p.total_sales,
+      price: p.price,
+      date_created: p.date_created,
+      image_url: p.image_url,
+      category_ids: p.category_ids,
+      synced_at: new Date().toISOString(),
+    }));
+    await sb.from("products").upsert(productRows, { onConflict: "project_id,wp_id" });
+  }
+
   await sb
     .from("projects")
     .update({ last_post_at: latest, yoast_ready: yoast })
     .eq("id", projectId);
 
-  return { posts: posts.length, categories: categories.length, tags: tags.length };
+  return {
+    posts: posts.length,
+    categories: categories.length,
+    tags: tags.length,
+    products: products.length,
+  };
 }
 
 /** Step 3 — create the project (encrypted creds) and run the initial sync. */

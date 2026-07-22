@@ -48,22 +48,42 @@ async function callGemini(env: Env, model: string, body: unknown): Promise<any> 
   return res.json();
 }
 
+export interface ArticleContext {
+  categoryName?: string;
+  productNames?: string[];
+}
+
 /**
  * Generates a full blog article as structured JSON.
- * `systemPrompt` is the project's editable content_prompt.
+ * `systemPrompt` is the project's editable content_prompt. When `context`
+ * carries a product category + products, the article is written around them
+ * so it stays relevant to the store's catalog (spec §2.4) instead of generic.
  */
 export async function generateArticle(
   env: Env,
   systemPrompt: string,
   topic: string,
-  keywords: string[] = []
+  keywords: string[] = [],
+  context: ArticleContext = {}
 ): Promise<GeneratedArticle> {
   const keywordLine =
     keywords.length > 0
       ? `מילות המפתח (ביטויי חיפוש) של העסק: ${keywords.join(", ")}. בחר את המתאימה ביותר לנושא הפוסט כ-focus_keyword (או נסח מתאימה אם אף אחת אינה מדויקת), ובנה את הפוסט סביבה.`
       : "";
+  const categoryBlock = context.categoryName
+    ? [
+        "",
+        "המאמר נכתב עבור אתר מסחר אלקטרוני (חנות).",
+        `קטגוריית המוצרים שאליה המאמר משויך: ${context.categoryName}`,
+        context.productNames && context.productNames.length
+          ? `מוצרים מובילים ורלוונטיים בקטגוריה (התייחס אליהם באופן טבעי בתוכן, בלי לפרסם באגרסיביות): ${context.productNames.join(", ")}`
+          : "",
+        "יש להביא בחשבון את הקטגוריה ואת המוצרים כדי שהתוכן יהיה רלוונטי למוצרים הנמכרים באתר ולא גנרי.",
+      ].filter(Boolean)
+    : [];
   const prompt = [
     systemPrompt?.trim() || "כתוב מאמר בלוג איכותי, מקצועי ומותאם SEO בעברית.",
+    ...categoryBlock,
     "",
     `נושא הפוסט: ${topic}`,
     keywordLine,
@@ -214,6 +234,81 @@ export async function suggestInternalLinks(
   if (!text) return [];
   try {
     return (JSON.parse(text) as { suggestions: LinkSuggestion[] }).suggestions ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export interface CategoryIdea {
+  title: string;
+  category_id: number;
+}
+
+const CATEGORY_IDEAS_SCHEMA = {
+  type: "object",
+  properties: {
+    ideas: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { title: { type: "string" }, category_id: { type: "number" } },
+        required: ["title", "category_id"],
+      },
+    },
+  },
+  required: ["ideas"],
+};
+
+/**
+ * Generates post-title ideas, each tied to the most relevant product category
+ * (spec §1.3). Avoids duplicating existing articles AND pending ideas.
+ */
+export async function generateCategoryIdeas(
+  env: Env,
+  systemPrompt: string,
+  categories: { id: number; name: string; sampleProducts: string[] }[],
+  existingTitles: string[],
+  pendingTitles: string[],
+  count = 10
+): Promise<CategoryIdea[]> {
+  const catalog = categories
+    .map(
+      (c) =>
+        `- category_id ${c.id} · "${c.name}"${
+          c.sampleProducts.length ? ` (מוצרים לדוגמה: ${c.sampleProducts.slice(0, 12).join(", ")})` : ""
+        }`
+    )
+    .join("\n");
+
+  const prompt = [
+    systemPrompt?.trim() || "אתה אסטרטג תוכן SEO לחנות מסחר אלקטרוני בעברית.",
+    "",
+    "קטגוריות המוצרים הזמינות (עם מוצרים לדוגמה מהמלאי):",
+    catalog,
+    "",
+    "כותרות מאמרים שכבר קיימים באתר:",
+    existingTitles.map((t) => `- ${t}`).join("\n") || "(אין)",
+    "",
+    "רעיונות שכבר הוצעו וממתינים (אין לחזור עליהם, גם לא בניסוח שונה):",
+    pendingTitles.map((t) => `- ${t}`).join("\n") || "(אין)",
+    "",
+    `הצע ${count} רעיונות לכותרות מאמרים חדשים ואיכותיים. כל רעיון חייב להיות משויך ל-category_id אחד מהרשימה — הרלוונטי ביותר לנושא הכתבה — כדי שהתוכן יתמוך במוצרים הנמכרים בקטגוריה.`,
+    "אל תחזור על מאמרים קיימים או על רעיונות ממתינים. החזר JSON: { ideas: [{ title, category_id }] }, בעברית.",
+  ].join("\n");
+
+  const data = await callGemini(env, textModel(env), {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: CATEGORY_IDEAS_SCHEMA,
+      temperature: 0.9,
+    },
+  });
+
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) return [];
+  try {
+    return (JSON.parse(text) as { ideas: CategoryIdea[] }).ideas?.slice(0, count) ?? [];
   } catch {
     return [];
   }

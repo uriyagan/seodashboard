@@ -131,7 +131,8 @@ GSC_CLIENT_SECRET=
 | `/api/projects/:id/media` | POST | העלאת תמונה למדיה של WP | WordPress |
 | `/api/projects/:id/ai/write` | POST | כתיבת מאמר עם Gemini (content_prompt) | Gemini |
 | `/api/projects/:id/ai/image` | POST | יצירת תמונה (Nano Banana 2) + העלאה למדיה | Gemini, WordPress |
-| `/api/projects/:id/ideas/generate` | POST | 10 רעיונות מ-Gemini לפי כותרות קיימות | Gemini, Supabase |
+| `/api/projects/:id/idea-categories` | GET | קטגוריות מוצרים עם 5+ מוצרים במלאי (לבחירה) | Supabase |
+| `/api/projects/:id/ideas/generate` | POST | רעיונות מבוססי-קטגוריה + 50 מוצרים מובילים לכל רעיון | Gemini, Supabase |
 | `/api/projects/:id/ideas/:ideaId/write` | POST | כתיבת פוסט מרעיון (מאמר+תמונה) → טיוטה מקומית | Gemini, WordPress, Supabase |
 | `/api/monitor/run` | POST | הרצת ניטור הקצב ידנית (זהה ל-Cron) | Supabase, Resend |
 | `/api/gsc/authorize` | GET | בניית כתובת ההסכמה של Google (OAuth) | Google OAuth |

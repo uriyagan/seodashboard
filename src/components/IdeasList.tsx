@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Lightbulb, PenLine, Sparkles, X } from "lucide-react";
+import { Lightbulb, Package, PenLine, Sparkles, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
@@ -10,6 +10,110 @@ interface Idea {
   title: string;
   status: string;
   created_at: string;
+  product_category_name: string | null;
+}
+
+interface Category {
+  id: number;
+  name: string;
+  count: number;
+}
+
+/** Modal to pick which product categories to generate ideas for (spec §1.6). */
+function CategoryModal({
+  projectId,
+  onClose,
+  onGenerate,
+}: {
+  projectId: string;
+  onClose: () => void;
+  onGenerate: (categoryIds: number[]) => void;
+}) {
+  const [cats, setCats] = useState<Category[] | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<{ categories: Category[] }>(`/api/projects/${projectId}/idea-categories`, undefined, "GET")
+      .then((r) => setCats(r.categories))
+      .catch((e) => setError(e instanceof Error ? e.message : "טעינת הקטגוריות נכשלה"));
+  }, [projectId]);
+
+  function toggle(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+          <h2 className="text-lg font-bold text-[var(--text)]">בחירת קטגוריות מוצרים</h2>
+          <button
+            onClick={onClose}
+            className="flex size-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            aria-label="סגירה"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <p className="mb-3 text-sm text-[var(--muted)]">
+            בחר קטגוריות שעבורן לקבל רעיונות, או המשך מכל הקטגוריות. מוצגות רק קטגוריות עם 5+ מוצרים במלאי.
+          </p>
+          {error && <Alert>{error}</Alert>}
+          {!cats && !error && (
+            <div className="flex justify-center py-8">
+              <Spinner className="size-6" />
+            </div>
+          )}
+          {cats && cats.length === 0 && (
+            <p className="py-6 text-center text-sm text-[var(--muted)]">
+              אין קטגוריות מוצרים עם מספיק מוצרים במלאי. ודא שהאתר מסונכרן (WooCommerce).
+            </p>
+          )}
+          {cats && cats.length > 0 && (
+            <ul className="space-y-1.5">
+              {cats.map((cat) => (
+                <li key={cat.id}>
+                  <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-[var(--border)] p-2.5 transition-colors hover:bg-[var(--surface-2)]">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(cat.id)}
+                      onChange={() => toggle(cat.id)}
+                      className="size-4 accent-[var(--brand)]"
+                    />
+                    <span className="flex-1 text-sm text-[var(--text)]">{cat.name}</span>
+                    <span className="text-xs text-[var(--muted)]">{cat.count} מוצרים</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--border)] px-5 py-4">
+          <Button variant="ghost" onClick={() => onGenerate([])} disabled={!cats?.length}>
+            מכל הקטגוריות
+          </Button>
+          <Button onClick={() => onGenerate([...selected])} disabled={selected.size === 0}>
+            <Sparkles className="size-4" />
+            צור רעיונות ({selected.size})
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void }) {
@@ -19,13 +123,14 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
   const [generating, setGenerating] = useState(false);
   const [writingId, setWritingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!activeProject) return;
     setLoading(true);
     const { data } = await supabase
       .from("ideas")
-      .select("id, title, status, created_at")
+      .select("id, title, status, created_at, product_category_name")
       .eq("project_id", activeProject.id)
       .eq("status", "suggested")
       .order("created_at", { ascending: false });
@@ -37,12 +142,17 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
     void load();
   }, [load]);
 
-  async function generate() {
+  async function generate(categoryIds: number[]) {
     if (!activeProject) return;
+    setModalOpen(false);
     setGenerating(true);
     setError(null);
     try {
-      await api(`/api/projects/${activeProject.id}/ideas/generate`);
+      const r = await api<{ ok: boolean; error?: string }>(
+        `/api/projects/${activeProject.id}/ideas/generate`,
+        { categoryIds }
+      );
+      if (!r.ok) throw new Error(r.error || "יצירת רעיונות נכשלה");
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "יצירת רעיונות נכשלה");
@@ -82,10 +192,10 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
         <div>
           <h1 className="text-2xl font-bold text-[var(--text)]">רעיונות לפוסטים</h1>
           <p className="text-sm text-[var(--muted)]">
-            Gemini מציע פוסטים חדשים על סמך מה שכבר נכתב באתר
+            Gemini מציע פוסטים חדשים לפי קטגוריות המוצרים והמלאי בחנות
           </p>
         </div>
-        <Button className="shrink-0" onClick={generate} loading={generating}>
+        <Button className="shrink-0" onClick={() => setModalOpen(true)} loading={generating}>
           {!generating && <Sparkles className="size-4" />}
           הצע לי רעיונות חדשים
         </Button>
@@ -101,14 +211,22 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
         <Card className="flex flex-col items-center gap-2 py-16 text-center">
           <Lightbulb className="size-8 text-[var(--muted)]" />
           <p className="text-sm text-[var(--muted)]">
-            אין רעיונות כרגע. לחץ על "הצע לי רעיונות חדשים" כדי לקבל 10 רעיונות.
+            אין רעיונות כרגע. לחץ על "הצע לי רעיונות חדשים" כדי לקבל רעיונות מבוססי-קטגוריה.
           </p>
         </Card>
       ) : (
         <div className="grid gap-3">
           {ideas.map((idea) => (
             <Card key={idea.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <span className="font-medium text-[var(--text)]">{idea.title}</span>
+              <div className="min-w-0">
+                <span className="font-medium text-[var(--text)]">{idea.title}</span>
+                {idea.product_category_name && (
+                  <span className="mt-1.5 flex w-fit items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs text-[var(--muted)]">
+                    <Package className="size-3" />
+                    {idea.product_category_name}
+                  </span>
+                )}
+              </div>
               <div className="flex shrink-0 items-center gap-2">
                 <Button size="sm" onClick={() => write(idea)} loading={writingId === idea.id}>
                   {writingId !== idea.id && <PenLine className="size-4" />}
@@ -126,6 +244,14 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
             </Card>
           ))}
         </div>
+      )}
+
+      {modalOpen && (
+        <CategoryModal
+          projectId={activeProject.id}
+          onClose={() => setModalOpen(false)}
+          onGenerate={generate}
+        />
       )}
     </div>
   );
