@@ -31,6 +31,20 @@ function authHeader(auth: WpAuth): string {
   return "Basic " + btoa(`${auth.username}:${auth.appPassword}`);
 }
 
+// Some hosts (e.g. SiteGround) block browser-like User-Agents coming from
+// datacenter IPs and return an HTML block page. A neutral custom UA passes.
+const USER_AGENT = "SEO-Dashboard/1.0 (+https://seo.uriyaganor.com)";
+
+/** Standard headers for WP REST calls, with UA + optional auth + extras. */
+function wpHeaders(auth?: WpAuth, extra?: Record<string, string>): Record<string, string> {
+  return {
+    "User-Agent": USER_AGENT,
+    Accept: "application/json",
+    ...(auth ? { Authorization: authHeader(auth) } : {}),
+    ...extra,
+  };
+}
+
 function apiBase(siteUrl: string): string {
   return siteUrl.replace(/\/+$/, "") + "/wp-json/wp/v2";
 }
@@ -41,7 +55,7 @@ export async function checkRestReachable(
 ): Promise<{ ok: boolean; namespaces?: string[]; error?: string }> {
   try {
     const url = siteUrl.replace(/\/+$/, "") + "/wp-json/";
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const res = await fetch(url, { headers: wpHeaders() });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     const json = (await res.json()) as { namespaces?: string[] };
     if (!json.namespaces?.includes("wp/v2")) {
@@ -59,7 +73,7 @@ export async function testConnection(
 ): Promise<{ ok: boolean; user?: string; error?: string }> {
   try {
     const res = await fetch(apiBase(auth.siteUrl) + "/users/me?context=edit", {
-      headers: { Authorization: authHeader(auth), Accept: "application/json" },
+      headers: wpHeaders(auth),
     });
     if (res.status === 401 || res.status === 403) {
       return { ok: false, error: "אימות נכשל — שם משתמש או Application Password שגויים" };
@@ -88,7 +102,7 @@ export async function fetchAllTerms(
   for (;;) {
     const res = await fetch(
       `${apiBase(auth.siteUrl)}/${taxonomy}?per_page=100&page=${page}&_fields=id,name,slug,count`,
-      { headers: { Authorization: authHeader(auth), Accept: "application/json" } }
+      { headers: wpHeaders(auth) }
     );
     if (!res.ok) break;
     const batch = (await res.json()) as WpTerm[];
@@ -117,7 +131,7 @@ export interface WpPostFull {
 export async function fetchPostFull(auth: WpAuth, wpId: number): Promise<WpPostFull> {
   const res = await fetch(
     `${apiBase(auth.siteUrl)}/posts/${wpId}?context=edit&_fields=id,title,content,status,categories,tags,featured_media,meta,yoast_head_json`,
-    { headers: { Authorization: authHeader(auth), Accept: "application/json" } }
+    { headers: wpHeaders(auth) }
   );
   if (!res.ok) throw new Error(`fetch post ${wpId} failed: HTTP ${res.status}`);
   const p = (await res.json()) as {
@@ -182,11 +196,7 @@ export async function pushPost(auth: WpAuth, input: PushPostInput): Promise<numb
 
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: authHeader(auth),
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
+    headers: wpHeaders(auth, { "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -205,11 +215,7 @@ export async function createTerm(
 ): Promise<WpTerm> {
   const res = await fetch(`${apiBase(auth.siteUrl)}/${taxonomy}`, {
     method: "POST",
-    headers: {
-      Authorization: authHeader(auth),
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
+    headers: wpHeaders(auth, { "Content-Type": "application/json" }),
     body: JSON.stringify({ name }),
   });
   if (!res.ok) {
@@ -230,12 +236,10 @@ export async function uploadMedia(
 ): Promise<{ id: number; url: string }> {
   const res = await fetch(`${apiBase(auth.siteUrl)}/media`, {
     method: "POST",
-    headers: {
-      Authorization: authHeader(auth),
+    headers: wpHeaders(auth, {
       "Content-Type": mimeType,
       "Content-Disposition": `attachment; filename="${filename}"`,
-      Accept: "application/json",
-    },
+    }),
     body: bytes as unknown as BodyInit,
   });
   if (!res.ok) {
@@ -253,7 +257,7 @@ export async function fetchAllPosts(auth: WpAuth): Promise<WpPostSummary[]> {
   for (;;) {
     const res = await fetch(
       `${apiBase(auth.siteUrl)}/posts?per_page=100&page=${page}&status=publish,draft,pending,private,future&_fields=id,title,status,link,date,modified,categories,tags`,
-      { headers: { Authorization: authHeader(auth), Accept: "application/json" } }
+      { headers: wpHeaders(auth) }
     );
     if (!res.ok) break;
     const batch = (await res.json()) as Array<{
