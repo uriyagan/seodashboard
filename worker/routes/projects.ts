@@ -133,6 +133,8 @@ async function syncProject(
       wp_status: p.status,
       local_status: "pushed",
       source: "synced",
+      link: p.link ?? null,
+      featured_thumb_url: p.image || null,
       categories: p.categories.map((id) => ({ id, name: catName.get(id) ?? "" })),
       tags: p.tags.map((id) => ({ id, name: tagName.get(id) ?? "" })),
       published_at: p.status === "publish" ? p.date : null,

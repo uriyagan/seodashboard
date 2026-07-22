@@ -31,6 +31,7 @@ export interface WpPostSummary {
   title: string;
   status: string; // publish | draft | pending | private | future
   link: string;
+  image: string;
   date: string | null;
   modified: string | null;
   categories: number[];
@@ -412,7 +413,8 @@ export async function fetchAllPosts(
       per_page: 100,
       page,
       status: "publish,draft,pending,private,future",
-      _fields: "id,title,status,link,date,modified,categories,tags",
+      _embed: "wp:featuredmedia",
+      _fields: "id,title,status,link,date,modified,categories,tags,_links,_embedded",
     }, runner);
     if (r.status >= 400) break;
     const batch = JSON.parse(r.text) as Array<{
@@ -424,13 +426,16 @@ export async function fetchAllPosts(
       modified: string | null;
       categories?: number[];
       tags?: number[];
+      _embedded?: { "wp:featuredmedia"?: Array<{ source_url?: string; media_details?: { sizes?: { medium?: { source_url?: string } } } }> };
     }>;
     for (const p of batch) {
+      const media = p._embedded?.["wp:featuredmedia"]?.[0];
       out.push({
         id: p.id,
         title: p.title?.rendered ?? "",
         status: p.status,
         link: p.link,
+        image: media?.media_details?.sizes?.medium?.source_url ?? media?.source_url ?? "",
         date: p.date,
         modified: p.modified,
         categories: p.categories ?? [],

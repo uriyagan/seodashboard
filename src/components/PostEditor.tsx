@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   ImagePlus,
   Save,
   Sparkles,
+  Upload,
   UploadCloud,
   Wand2,
 } from "lucide-react";
@@ -53,9 +54,10 @@ export function PostEditor({
   const { activeProject } = useProjects();
   const [state, setState] = useState<EditorState>(BLANK);
   const [loading, setLoading] = useState(Boolean(postId));
-  const [busy, setBusy] = useState<null | "save" | "push" | "write" | "image">(null);
+  const [busy, setBusy] = useState<null | "save" | "push" | "write" | "image" | "upload">(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const set = <K extends keyof EditorState>(k: K, v: EditorState[K]) =>
     setState((s) => ({ ...s, [k]: v }));
@@ -218,6 +220,35 @@ export function PostEditor({
     }
   }
 
+  async function onUploadImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy("upload");
+    setError(null);
+    setNotice(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const r = await api<{ ok: boolean; url?: string; mediaId?: number; error?: string }>(
+        `/api/projects/${activeProject!.id}/media`,
+        { base64, mimeType: file.type || "image/png", filename: file.name || "image.png" }
+      );
+      if (!r.ok || !r.url) throw new Error(r.error || "ההעלאה נכשלה");
+      set("featured_image_url", r.url);
+      set("featured_media", r.mediaId ?? null);
+      setNotice("התמונה הועלתה ✓");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "ההעלאה נכשלה");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function onGenImage() {
     setBusy("image");
     setError(null);
@@ -308,17 +339,28 @@ export function PostEditor({
                   <ImagePlus className="size-6" />
                 </div>
               )}
-              <Button variant="outline" onClick={onGenImage} loading={busy === "image"} className="w-full">
-                <Sparkles className="size-4" />
-                צור תמונה (Nano Banana 2)
-              </Button>
-              <Input
-                dir="ltr"
-                className="mt-2"
-                placeholder="או הדבק כתובת תמונה"
-                value={state.featured_image_url}
-                onChange={(e) => set("featured_image_url", e.target.value)}
-              />
+              <div className="space-y-2">
+                <Button variant="outline" onClick={onGenImage} loading={busy === "image"} className="w-full">
+                  <Sparkles className="size-4" />
+                  צור תמונה (Nano Banana 2)
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  loading={busy === "upload"}
+                  className="w-full"
+                >
+                  <Upload className="size-4" />
+                  {state.featured_image_url ? "החלף תמונה" : "העלה תמונה"}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={onUploadImage}
+                />
+              </div>
             </Card>
 
             {/* Taxonomies */}

@@ -37,6 +37,15 @@ add_action('rest_api_init', function () {
         'callback'            => 'seo_dash_full_sync',
     ]);
 });
+function seo_dash_terms($taxonomy) {
+    $out = [];
+    if (!taxonomy_exists($taxonomy)) return $out;
+    foreach (get_terms(['taxonomy' => $taxonomy, 'hide_empty' => false]) as $t) {
+        if (is_wp_error($t)) continue;
+        $out[] = ['id' => $t->term_id, 'name' => $t->name, 'slug' => $t->slug, 'link' => get_term_link($t)];
+    }
+    return $out;
+}
 function seo_dash_full_sync() {
     $posts = [];
     foreach (get_posts([
@@ -49,21 +58,27 @@ function seo_dash_full_sync() {
             'title'      => $p->post_title,
             'status'     => $p->post_status,
             'link'       => get_permalink($p->ID),
+            'image'      => get_the_post_thumbnail_url($p->ID, 'medium') ?: '',
             'date'       => mysql2date('c', $p->post_date_gmt),
             'modified'   => mysql2date('c', $p->post_modified_gmt),
             'categories' => wp_get_post_categories($p->ID),
             'tags'       => wp_get_post_tags($p->ID, ['fields' => 'ids']),
         ];
     }
-    $cats = [];
-    foreach (get_terms(['taxonomy' => 'category', 'hide_empty' => false]) as $t) {
-        $cats[] = ['id' => $t->term_id, 'name' => $t->name, 'slug' => $t->slug];
+    // Pages — for internal-link suggestions.
+    $pages = [];
+    foreach (get_posts(['post_type' => 'page', 'post_status' => 'publish', 'numberposts' => -1]) as $p) {
+        $pages[] = ['id' => $p->ID, 'title' => $p->post_title, 'link' => get_permalink($p->ID)];
     }
-    $tags = [];
-    foreach (get_terms(['taxonomy' => 'post_tag', 'hide_empty' => false]) as $t) {
-        $tags[] = ['id' => $t->term_id, 'name' => $t->name, 'slug' => $t->slug];
-    }
-    return ['posts' => $posts, 'categories' => $cats, 'tags' => $tags, 'yoast' => defined('WPSEO_VERSION')];
+    return [
+        'posts'              => $posts,
+        'categories'         => seo_dash_terms('category'),
+        'tags'               => seo_dash_terms('post_tag'),
+        'product_categories' => seo_dash_terms('product_cat'),
+        'product_tags'       => seo_dash_terms('product_tag'),
+        'pages'              => $pages,
+        'yoast'              => defined('WPSEO_VERSION'),
+    ];
 }
 
 // --- Poll every minute via WP-Cron ---
