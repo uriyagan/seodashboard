@@ -290,6 +290,7 @@ export interface PushPostInput {
   wpId?: number | null;
   title: string;
   content_html: string;
+  status: string; // draft | publish | pending | private
   categories: number[];
   tags: number[];
   featured_media?: number | null;
@@ -298,7 +299,7 @@ export interface PushPostInput {
   meta_description?: string;
 }
 
-/** Creates or updates a post on WordPress, always as a draft. Sets Yoast meta. */
+/** Creates or updates a post on WordPress at the given status. Sets Yoast meta. */
 export async function pushPost(
   auth: WpAuth,
   input: PushPostInput,
@@ -308,7 +309,7 @@ export async function pushPost(
   const body: Record<string, unknown> = {
     title: input.title,
     content: input.content_html,
-    status: "draft", // always draft
+    status: input.status || "draft",
     categories: input.categories,
     tags: input.tags,
     // Requires the Yoast REST snippet on the site to persist these meta keys.

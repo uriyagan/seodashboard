@@ -24,6 +24,7 @@ interface EditorState {
   wp_post_id: number | null;
   title: string;
   content_html: string;
+  status: string;
   focus_keyword: string;
   seo_title: string;
   meta_description: string;
@@ -38,6 +39,7 @@ const BLANK: EditorState = {
   wp_post_id: null,
   title: "",
   content_html: "",
+  status: "draft",
   focus_keyword: "",
   seo_title: "",
   meta_description: "",
@@ -46,6 +48,13 @@ const BLANK: EditorState = {
   categories: [],
   tags: [],
 };
+
+const STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: "draft", label: "טיוטה" },
+  { value: "publish", label: "מפורסם" },
+  { value: "pending", label: "ממתין לבדיקה" },
+  { value: "private", label: "פרטי" },
+];
 
 export function PostEditor({
   postId,
@@ -122,6 +131,7 @@ export function PostEditor({
           wp_post_id: data.wp_post_id,
           title: data.title ?? "",
           content_html: content ?? "",
+          status: data.wp_status ?? "draft",
           focus_keyword: data.focus_keyword ?? "",
           seo_title: data.seo_title ?? "",
           meta_description: data.meta_description ?? "",
@@ -150,6 +160,7 @@ export function PostEditor({
       featured_image_url: state.featured_image_url || null,
       categories: state.categories,
       tags: state.tags,
+      wp_status: state.status,
       local_status: "editing",
     };
     const { data, error } = await supabase.from("posts").upsert(row).select("id").single();
@@ -164,7 +175,7 @@ export function PostEditor({
     setNotice(null);
     try {
       await saveLocal();
-      setNotice("הטיוטה נשמרה מקומית.");
+      setNotice("נשמר מקומית.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "השמירה נכשלה");
     } finally {
@@ -178,13 +189,14 @@ export function PostEditor({
     setNotice(null);
     try {
       await saveLocal();
-      const r = await api<{ ok: boolean; wpId?: number; error?: string }>(
+      const r = await api<{ ok: boolean; wpId?: number; status?: string; error?: string }>(
         `/api/projects/${activeProject!.id}/posts/push`,
         {
           postId: state.id,
           wpId: state.wp_post_id,
           title: state.title,
           content_html: state.content_html,
+          status: state.status,
           categories: state.categories,
           tags: state.tags,
           featured_media: state.featured_media,
@@ -196,7 +208,8 @@ export function PostEditor({
       );
       if (!r.ok) throw new Error(r.error || "הדחיפה נכשלה");
       if (r.wpId) set("wp_post_id", r.wpId);
-      setNotice("נדחף ל-WordPress כטיוטה בהצלחה ✓");
+      const label = STATUS_OPTIONS.find((s) => s.value === state.status)?.label ?? "";
+      setNotice(`נשמר ל-WordPress (${label}) בהצלחה ✓`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "הדחיפה נכשלה");
     } finally {
@@ -328,13 +341,27 @@ export function PostEditor({
           חזרה לפוסטים
         </button>
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-[var(--muted)]">סטטוס:</span>
+            <select
+              value={state.status}
+              onChange={(e) => set("status", e.target.value)}
+              className="h-10 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text)] outline-none focus-visible:border-[var(--brand)]"
+            >
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <Button variant="outline" onClick={onSave} loading={busy === "save"}>
             <Save className="size-4" />
-            שמירת טיוטה
+            שמירה מקומית
           </Button>
           <Button onClick={onPush} loading={busy === "push"}>
             <UploadCloud className="size-4" />
-            דחיפה ל-WordPress
+            שמירה ל-WordPress
           </Button>
         </div>
       </div>

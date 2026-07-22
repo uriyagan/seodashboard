@@ -44,6 +44,7 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
     wpId?: number | null;
     title: string;
     content_html: string;
+    status?: string;
     categories: { id: number; name: string }[];
     tags: { id: number; name: string }[];
     featured_media?: number | null;
@@ -53,6 +54,9 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
     meta_description?: string;
   }>();
 
+  const allowed = ["draft", "publish", "pending", "private"];
+  const status = allowed.includes(body.status ?? "") ? body.status! : "draft";
+
   try {
     const auth = await projectAuth(c.env, project);
     const runner = makeCompanionRunner(sb, projectId);
@@ -60,6 +64,7 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
       wpId: body.wpId,
       title: body.title,
       content_html: body.content_html,
+      status,
       categories: body.categories.map((t) => t.id),
       tags: body.tags.map((t) => t.id),
       featured_media: body.featured_media,
@@ -79,14 +84,15 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
       featured_image_url: body.featured_image_url ?? null,
       categories: body.categories,
       tags: body.tags,
-      wp_status: "draft",
+      wp_status: status,
       local_status: "pushed",
+      published_at: status === "publish" ? new Date().toISOString() : null,
       pushed_at: new Date().toISOString(),
     };
     await sb.from("posts").upsert(row, { onConflict: "project_id,wp_post_id" });
     await sb.from("projects").update({ last_post_at: new Date().toISOString() }).eq("id", projectId);
 
-    return c.json({ ok: true, wpId });
+    return c.json({ ok: true, wpId, status });
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : "push failed" }, 500);
   }
