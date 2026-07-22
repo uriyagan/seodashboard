@@ -11,6 +11,8 @@
  * User-Agent is also sent, since bot-like UAs get 403'd.
  */
 
+import type { CompanionRunner } from "./companion";
+
 export interface WpAuth {
   siteUrl: string;
   username: string;
@@ -80,7 +82,8 @@ async function wpFetch(
   auth: WpAuth | undefined,
   route: string,
   init: RequestInit = {},
-  query: Record<string, string | number> = {}
+  query: Record<string, string | number> = {},
+  runner?: CompanionRunner
 ): Promise<WpResult> {
   const headers: Record<string, string> = {
     "User-Agent": BROWSER_UA,
@@ -113,15 +116,46 @@ async function wpFetch(
     }
     return { status: res.status, headers: res.headers, text };
   }
+
+  // Both direct forms blocked. Last resort: run it inside the site via the
+  // companion queue (the site's snippet polls us, runs it, posts back).
+  if (runner) {
+    const bodyStr = typeof init.body === "string" ? init.body : undefined;
+    let bodyObj: unknown;
+    if (bodyStr) {
+      try {
+        bodyObj = JSON.parse(bodyStr);
+      } catch {
+        bodyObj = bodyStr;
+      }
+    }
+    const result = await runner({
+      method: (init.method as string) ?? "GET",
+      route,
+      query,
+      body: bodyObj,
+    });
+    const h = new Headers();
+    for (const [k, v] of Object.entries(result.headers ?? {})) {
+      if (v != null) h.set(k, String(v));
+    }
+    return {
+      status: result.status,
+      headers: h,
+      text: JSON.stringify(result.body ?? null),
+    };
+  }
+
   throw new Error(lastErr);
 }
 
 /** Checks that the WordPress REST API is reachable (no auth needed). */
 export async function checkRestReachable(
-  siteUrl: string
+  siteUrl: string,
+  runner?: CompanionRunner
 ): Promise<{ ok: boolean; namespaces?: string[]; error?: string }> {
   try {
-    const r = await wpFetch(siteUrl, undefined, "/");
+    const r = await wpFetch(siteUrl, undefined, "/", {}, {}, runner);
     const json = JSON.parse(r.text) as { namespaces?: string[] };
     if (!json.namespaces?.includes("wp/v2")) {
       return { ok: false, error: "WordPress REST API (wp/v2) not found" };
@@ -134,10 +168,11 @@ export async function checkRestReachable(
 
 /** Verifies credentials by requesting the authenticated user. */
 export async function testConnection(
-  auth: WpAuth
+  auth: WpAuth,
+  runner?: CompanionRunner
 ): Promise<{ ok: boolean; user?: string; error?: string }> {
   try {
-    const r = await wpFetch(auth.siteUrl, auth, "/wp/v2/users/me", {}, { context: "edit" });
+    const r = await wpFetch(auth.siteUrl, auth, "/wp/v2/users/me", {}, { context: "edit" }, runner);
     if (r.status === 401 || r.status === 403) {
       return { ok: false, error: "אימות נכשל — שם משתמש או Application Password שגויים" };
     }
@@ -150,15 +185,16 @@ export async function testConnection(
 }
 
 /** Detects whether the Yoast SEO plugin exposes its namespace. */
-export async function detectYoast(siteUrl: string): Promise<boolean> {
-  const check = await checkRestReachable(siteUrl);
+export async function detectYoast(siteUrl: string, runner?: CompanionRunner): Promise<boolean> {
+  const check = await checkRestReachable(siteUrl, runner);
   return check.namespaces?.some((n) => n.startsWith("yoast")) ?? false;
 }
 
 /** Fetches all terms of a taxonomy (categories or post_tag), paginated. */
 export async function fetchAllTerms(
   auth: WpAuth,
-  taxonomy: "categories" | "tags"
+  taxonomy: "categories" | "tags",
+  runner?: CompanionRunner
 ): Promise<WpTerm[]> {
   const out: WpTerm[] = [];
   let page = 1;
@@ -167,7 +203,7 @@ export async function fetchAllTerms(
       per_page: 100,
       page,
       _fields: "id,name,slug,count",
-    });
+    }, runner);
     if (r.status >= 400) break;
     const batch = JSON.parse(r.text) as WpTerm[];
     out.push(...batch);
@@ -192,11 +228,15 @@ export interface WpPostFull {
 }
 
 /** Fetches a single post's full content + Yoast meta (context=edit). */
-export async function fetchPostFull(auth: WpAuth, wpId: number): Promise<WpPostFull> {
+export async function fetchPostFull(
+  auth: WpAuth,
+  wpId: number,
+  runner?: CompanionRunner
+): Promise<WpPostFull> {
   const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/posts/${wpId}`, {}, {
     context: "edit",
     _fields: "id,title,content,status,categories,tags,featured_media,meta,yoast_head_json",
-  });
+  }, runner);
   if (r.status >= 400) throw new Error(`fetch post ${wpId} failed: HTTP ${r.status}`);
   const p = JSON.parse(r.text) as {
     id: number;
@@ -237,7 +277,11 @@ export interface PushPostInput {
 }
 
 /** Creates or updates a post on WordPress, always as a draft. Sets Yoast meta. */
-export async function pushPost(auth: WpAuth, input: PushPostInput): Promise<number> {
+export async function pushPost(
+  auth: WpAuth,
+  input: PushPostInput,
+  runner?: CompanionRunner
+): Promise<number> {
   const route = input.wpId ? `/wp/v2/posts/${input.wpId}` : "/wp/v2/posts";
   const body: Record<string, unknown> = {
     title: input.title,
@@ -258,7 +302,7 @@ export async function pushPost(auth: WpAuth, input: PushPostInput): Promise<numb
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }, {}, runner);
   if (r.status >= 400) {
     throw new Error(`push post failed: HTTP ${r.status} ${r.text.slice(0, 200)}`);
   }
@@ -269,13 +313,14 @@ export async function pushPost(auth: WpAuth, input: PushPostInput): Promise<numb
 export async function createTerm(
   auth: WpAuth,
   taxonomy: "categories" | "tags",
-  name: string
+  name: string,
+  runner?: CompanionRunner
 ): Promise<WpTerm> {
   const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/${taxonomy}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
-  });
+  }, {}, runner);
   if (r.status >= 400) {
     throw new Error(`create term failed: HTTP ${r.status} ${r.text.slice(0, 200)}`);
   }
@@ -306,7 +351,10 @@ export async function uploadMedia(
 }
 
 /** Fetches all posts (metadata + titles), paginated. Content is fetched lazily elsewhere. */
-export async function fetchAllPosts(auth: WpAuth): Promise<WpPostSummary[]> {
+export async function fetchAllPosts(
+  auth: WpAuth,
+  runner?: CompanionRunner
+): Promise<WpPostSummary[]> {
   const out: WpPostSummary[] = [];
   let page = 1;
   for (;;) {
@@ -315,7 +363,7 @@ export async function fetchAllPosts(auth: WpAuth): Promise<WpPostSummary[]> {
       page,
       status: "publish,draft,pending,private,future",
       _fields: "id,title,status,link,date,modified,categories,tags",
-    });
+    }, runner);
     if (r.status >= 400) break;
     const batch = JSON.parse(r.text) as Array<{
       id: number;

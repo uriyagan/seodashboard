@@ -3,6 +3,7 @@ import { projects } from "./routes/projects";
 import { posts } from "./routes/posts";
 import { ai } from "./routes/ai";
 import { ideas } from "./routes/ideas";
+import { companion } from "./routes/companion";
 import { requireAdmin } from "./lib/supabase";
 import { runMonitor } from "./lib/monitor";
 
@@ -38,6 +39,7 @@ app.route("/", projects); // Phase 2 — WordPress connect + sync
 app.route("/", posts); // Phase 3 — post fetch/push, terms, media
 app.route("/", ai); // Phase 4–5 — Gemini text + Nano Banana 2 images
 app.route("/", ideas); // Phase 6 — idea engine
+app.route("/", companion); // companion queue (firewalled sites)
 
 // Manual trigger for the monitor (admins only) — same logic the cron runs.
 app.post("/api/monitor/run", async (c) => {

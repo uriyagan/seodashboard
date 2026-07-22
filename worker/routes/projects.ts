@@ -11,6 +11,7 @@ import {
   fetchAllPosts,
   type WpAuth,
 } from "../lib/wordpress";
+import { makeCompanionRunner, type CompanionRunner } from "../lib/companion";
 
 export const projects = new Hono<{ Bindings: Env }>();
 
@@ -29,6 +30,11 @@ function decodeEntities(s: string): string {
     .replace(/&gt;/g, ">");
 }
 
+/** True when the error means the host firewall challenged us (not a real failure). */
+function isFirewallBlock(err?: string): boolean {
+  return /blocked by host firewall|blocked \(HTTP/i.test(err || "");
+}
+
 /** Step 1 — verify the WordPress REST API is reachable. */
 projects.post("/api/projects/check-url", async (c) => {
   const sb = await requireAdmin(c.env, c.req.raw);
@@ -36,6 +42,10 @@ projects.post("/api/projects/check-url", async (c) => {
   const { url } = await c.req.json<{ url: string }>();
   if (!url) return c.json({ ok: false, error: "missing url" }, 400);
   const result = await checkRestReachable(url);
+  // A firewalled site can't be reached directly — proceed via the companion later.
+  if (!result.ok && isFirewallBlock(result.error)) {
+    return c.json({ ok: true, firewalled: true });
+  }
   return c.json(result);
 });
 
@@ -50,6 +60,10 @@ projects.post("/api/projects/test-connection", async (c) => {
     appPassword: body.appPassword,
   };
   const conn = await testConnection(auth);
+  // Firewalled: credentials can't be verified directly; the companion will.
+  if (!conn.ok && isFirewallBlock(conn.error)) {
+    return c.json({ ok: true, firewalled: true });
+  }
   if (!conn.ok) return c.json(conn);
   const yoast = await detectYoast(body.url);
   return c.json({ ...conn, yoast });
@@ -59,12 +73,13 @@ projects.post("/api/projects/test-connection", async (c) => {
 async function syncProject(
   sb: SupabaseClient,
   projectId: string,
-  auth: WpAuth
+  auth: WpAuth,
+  runner?: CompanionRunner
 ): Promise<{ posts: number; categories: number; tags: number }> {
   // 1. Taxonomies
   const [categories, tags] = await Promise.all([
-    fetchAllTerms(auth, "categories"),
-    fetchAllTerms(auth, "tags"),
+    fetchAllTerms(auth, "categories", runner),
+    fetchAllTerms(auth, "tags", runner),
   ]);
 
   const termRows = [
@@ -93,7 +108,7 @@ async function syncProject(
   const tagName = new Map(tags.map((t) => [t.id, decodeEntities(t.name)]));
 
   // 2. Posts (metadata + titles only)
-  const posts = await fetchAllPosts(auth);
+  const posts = await fetchAllPosts(auth, runner);
   let latest: string | null = null;
   const postRows = posts.map((p) => {
     if (p.date && (!latest || p.date > latest)) latest = p.date;
@@ -117,7 +132,7 @@ async function syncProject(
 
   await sb
     .from("projects")
-    .update({ last_post_at: latest, yoast_ready: await detectYoast(auth.siteUrl) })
+    .update({ last_post_at: latest, yoast_ready: await detectYoast(auth.siteUrl, runner) })
     .eq("id", projectId);
 
   return { posts: posts.length, categories: categories.length, tags: tags.length };
@@ -142,9 +157,11 @@ projects.post("/api/projects/connect", async (c) => {
     appPassword: body.appPassword,
   };
 
-  // Re-verify before saving.
+  // Re-verify before saving. A firewall block is not a hard failure — we'll
+  // finish the connection through the companion snippet.
   const conn = await testConnection(auth);
-  if (!conn.ok) return c.json({ ok: false, error: conn.error }, 400);
+  const firewalled = !conn.ok && isFirewallBlock(conn.error);
+  if (!conn.ok && !firewalled) return c.json({ ok: false, error: conn.error }, 400);
 
   const encrypted = await encrypt(auth.appPassword, c.env.ENCRYPTION_KEY);
 
@@ -156,9 +173,20 @@ projects.post("/api/projects/connect", async (c) => {
       wp_username: auth.username,
       wp_app_password_encrypted: encrypted,
     })
-    .select("id")
+    .select("id, companion_token")
     .single();
   if (error || !project) return c.json({ ok: false, error: error?.message }, 500);
+
+  // Firewalled: skip the direct sync; the user installs the companion snippet
+  // and then syncs. Return the token so the UI can render the snippet.
+  if (firewalled) {
+    return c.json({
+      ok: true,
+      projectId: project.id,
+      firewalled: true,
+      companionToken: (project as { companion_token: string }).companion_token,
+    });
+  }
 
   try {
     const counts = await syncProject(sb, project.id, auth);
@@ -195,8 +223,10 @@ projects.post("/api/projects/:id/sync", async (c) => {
     appPassword: await decrypt(proj.wp_app_password_encrypted, c.env.ENCRYPTION_KEY!),
   };
 
+  // Direct first; if the host firewall blocks us, the companion queue takes over.
+  const runner = makeCompanionRunner(sb, id);
   try {
-    const counts = await syncProject(sb, id, auth);
+    const counts = await syncProject(sb, id, auth, runner);
     return c.json({ ok: true, ...counts });
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : "sync failed" }, 500);

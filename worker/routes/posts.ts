@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../index";
 import { requireAdmin } from "../lib/supabase";
 import { loadProject, projectAuth } from "../lib/project";
+import { makeCompanionRunner } from "../lib/companion";
 import {
   fetchPostFull,
   pushPost,
@@ -19,7 +20,8 @@ posts.get("/api/projects/:id/posts/:wpId", async (c) => {
   if (!project) return c.json({ error: "project not found" }, 404);
   try {
     const auth = await projectAuth(c.env, project);
-    const full = await fetchPostFull(auth, Number(c.req.param("wpId")));
+    const runner = makeCompanionRunner(sb, project.id);
+    const full = await fetchPostFull(auth, Number(c.req.param("wpId")), runner);
     return c.json({ ok: true, post: full });
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : "failed" }, 500);
@@ -53,6 +55,7 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
 
   try {
     const auth = await projectAuth(c.env, project);
+    const runner = makeCompanionRunner(sb, projectId);
     const wpId = await pushPost(auth, {
       wpId: body.wpId,
       title: body.title,
@@ -63,7 +66,7 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
       focus_keyword: body.focus_keyword,
       seo_title: body.seo_title,
       meta_description: body.meta_description,
-    });
+    }, runner);
 
     const row = {
       project_id: projectId,
@@ -104,7 +107,8 @@ posts.post("/api/projects/:id/terms", async (c) => {
 
   try {
     const auth = await projectAuth(c.env, project);
-    const term = await createTerm(auth, taxonomy, name);
+    const runner = makeCompanionRunner(sb, projectId);
+    const term = await createTerm(auth, taxonomy, name, runner);
     await sb.from("wp_terms").upsert(
       {
         project_id: projectId,

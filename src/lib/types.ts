@@ -9,6 +9,7 @@ export interface Project {
   stuck_draft_days: number;
   last_post_at: string | null;
   yoast_ready: boolean;
+  companion_token: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

@@ -7,14 +7,16 @@ import {
   KeyRound,
   Loader2,
   PartyPopper,
+  ShieldAlert,
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
 import { Alert, Button, Input, Label } from "@/components/ui";
+import { CompanionSnippet } from "@/components/CompanionSnippet";
 import { cn } from "@/lib/utils";
 
-type Step = 1 | 2 | 3 | 4;
+type Step = 1 | 2 | 3 | 4 | 5;
 
 const STEPS = ["כתובת", "התחברות", "סנכרון"];
 
@@ -30,6 +32,9 @@ export function AddSiteWizard({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [wpUser, setWpUser] = useState<string | null>(null);
   const [yoast, setYoast] = useState(false);
+  const [firewalled, setFirewalled] = useState(false);
+  const [projectId, setProjectId] = useState("");
+  const [companionToken, setCompanionToken] = useState("");
   const [summary, setSummary] = useState<{ posts: number; categories: number; tags: number } | null>(null);
 
   const cleanUrl = url.trim().replace(/\/+$/, "");
@@ -61,12 +66,20 @@ export function AddSiteWizard({ onClose }: { onClose: () => void }) {
     setError(null);
     setLoading(true);
     try {
-      const r = await api<{ ok: boolean; user?: string; yoast?: boolean; error?: string }>(
-        "/api/projects/test-connection",
-        { url: cleanUrl, username: username.trim(), appPassword: appPassword.trim() }
-      );
+      const r = await api<{
+        ok: boolean;
+        user?: string;
+        yoast?: boolean;
+        firewalled?: boolean;
+        error?: string;
+      }>("/api/projects/test-connection", {
+        url: cleanUrl,
+        username: username.trim(),
+        appPassword: appPassword.trim(),
+      });
       if (!r.ok) throw new Error(r.error || "אימות נכשל");
-      setWpUser(r.user ?? username);
+      setFirewalled(Boolean(r.firewalled));
+      setWpUser(r.firewalled ? null : r.user ?? username);
       setYoast(Boolean(r.yoast));
       setStep(3);
     } catch (err) {
@@ -84,6 +97,8 @@ export function AddSiteWizard({ onClose }: { onClose: () => void }) {
       const r = await api<{
         ok: boolean;
         projectId?: string;
+        firewalled?: boolean;
+        companionToken?: string;
         posts?: number;
         categories?: number;
         tags?: number;
@@ -96,12 +111,46 @@ export function AddSiteWizard({ onClose }: { onClose: () => void }) {
         appPassword: appPassword.trim(),
       });
       if (!r.ok) throw new Error(r.error || "החיבור נכשל");
-      setSummary({ posts: r.posts ?? 0, categories: r.categories ?? 0, tags: r.tags ?? 0 });
       await reload();
-      if (r.projectId) setActiveId(r.projectId);
+      if (r.projectId) {
+        setProjectId(r.projectId);
+        setActiveId(r.projectId);
+      }
+      if (r.firewalled) {
+        setCompanionToken(r.companionToken ?? "");
+        setStep(5); // install the companion snippet, then sync
+        return;
+      }
+      setSummary({ posts: r.posts ?? 0, categories: r.categories ?? 0, tags: r.tags ?? 0 });
       setStep(4);
     } catch (err) {
       setError(err instanceof Error ? err.message : "החיבור נכשל");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function syncAfterCompanion() {
+    setError(null);
+    setLoading(true);
+    try {
+      const r = await api<{
+        ok: boolean;
+        posts?: number;
+        categories?: number;
+        tags?: number;
+        error?: string;
+      }>(`/api/projects/${projectId}/sync`);
+      if (!r.ok) throw new Error(r.error || "הסנכרון נכשל");
+      setSummary({ posts: r.posts ?? 0, categories: r.categories ?? 0, tags: r.tags ?? 0 });
+      await reload();
+      setStep(4);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "הסנכרון נכשל — ודא שהסניפט הודבק ושה-cron פועל, ונסה שוב"
+      );
     } finally {
       setLoading(false);
     }
@@ -252,20 +301,32 @@ export function AddSiteWizard({ onClose }: { onClose: () => void }) {
           {step === 3 && (
             <form onSubmit={connectAndSync} className="space-y-4">
               <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3 text-sm">
-                <div className="flex items-center gap-2 text-[var(--text)]">
-                  <Check className="size-4 text-[var(--color-success)]" />
-                  מחובר כ־<span dir="ltr" className="font-medium">{wpUser}</span>
-                </div>
-                <div className="mt-1 flex items-center gap-2 text-[var(--muted)]">
-                  {yoast ? (
-                    <>
+                {firewalled ? (
+                  <div className="flex items-start gap-2 text-[var(--text)]">
+                    <ShieldAlert className="mt-0.5 size-4 shrink-0 text-[var(--color-warning)]" />
+                    <span>
+                      האתר מאחורי חומת אש (SiteGround) שחוסמת גישה ישירה. בשלב הבא נחבר
+                      אותו דרך סניפט ה-companion.
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 text-[var(--text)]">
                       <Check className="size-4 text-[var(--color-success)]" />
-                      Yoast SEO זוהה באתר
-                    </>
-                  ) : (
-                    <span>Yoast SEO לא זוהה — כתיבת שדות SEO תדרוש התקנת תוסף בהמשך.</span>
-                  )}
-                </div>
+                      מחובר כ־<span dir="ltr" className="font-medium">{wpUser}</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-[var(--muted)]">
+                      {yoast ? (
+                        <>
+                          <Check className="size-4 text-[var(--color-success)]" />
+                          Yoast SEO זוהה באתר
+                        </>
+                      ) : (
+                        <span>Yoast SEO לא זוהה — כתיבת שדות SEO תדרוש את הסניפט.</span>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
               <div>
                 <Label htmlFor="w-name">שם הפרויקט</Label>
@@ -300,6 +361,27 @@ export function AddSiteWizard({ onClose }: { onClose: () => void }) {
                 </div>
               )}
             </form>
+          )}
+
+          {/* Step 5 — Companion install (firewalled sites) */}
+          {step === 5 && (
+            <div className="space-y-4">
+              <CompanionSnippet token={companionToken} />
+              <div className="flex gap-2">
+                <Button className="flex-1" onClick={syncAfterCompanion} loading={loading}>
+                  {loading ? "מסנכרן…" : "הדבקתי — סנכרן עכשיו"}
+                </Button>
+                <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
+                  אעשה זאת אחר כך
+                </Button>
+              </div>
+              {loading && (
+                <div className="flex items-center justify-center gap-2 text-sm text-[var(--muted)]">
+                  <Loader2 className="size-4 animate-spin" />
+                  ממתין שהאתר יריץ את המשימה (עד דקה)…
+                </div>
+              )}
+            </div>
           )}
 
           {/* Step 4 — Done */}
