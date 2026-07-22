@@ -9,6 +9,8 @@ import {
   Plus,
   Globe,
   CalendarClock,
+  Menu,
+  X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -38,23 +40,49 @@ const NAV: { key: NavKey; label: string; icon: typeof LayoutDashboard }[] = [
   { key: "settings", label: "הגדרות", icon: Settings },
 ];
 
-/** Right sidebar: logo, nav, and (bottom) project switcher + theme + logout. */
+/** Right sidebar: logo, nav, and (bottom) project switcher + theme + logout.
+ *  Static on lg+; a slide-in drawer (with backdrop) on smaller screens. */
 function Sidebar({
   active,
   onNavigate,
   onAdd,
+  open,
+  onClose,
 }: {
   active: NavKey;
   onNavigate: (k: NavKey) => void;
   onAdd: () => void;
+  open: boolean;
+  onClose: () => void;
 }) {
   const { user, signOut } = useAuth();
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)]">
-      {/* Logo — stretched to the sidebar width */}
-      <div className="flex h-[76px] shrink-0 items-center border-b border-[var(--border)] px-5">
-        <Logo className="w-full text-[var(--text)]" />
-      </div>
+    <>
+      {/* Backdrop (mobile only) */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+          onClick={onClose}
+          aria-hidden
+        />
+      )}
+      <aside
+        className={cn(
+          "fixed inset-y-0 right-0 z-50 flex w-64 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)] transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0",
+          open ? "translate-x-0" : "translate-x-full lg:translate-x-0"
+        )}
+      >
+        {/* Logo — stretched to the sidebar width; close button on mobile */}
+        <div className="flex h-[76px] shrink-0 items-center gap-2 border-b border-[var(--border)] px-5">
+          <Logo className="w-full text-[var(--text)]" />
+          <button
+            onClick={onClose}
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] lg:hidden"
+            aria-label="סגירת תפריט"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
 
       {/* Nav */}
       <nav className="flex flex-1 flex-col gap-1 p-3">
@@ -95,16 +123,17 @@ function Sidebar({
           </div>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
 
-/** Top bar header — page title + active project context. */
+/** Desktop top bar — page title + active project context (hidden on mobile). */
 function Topbar({ nav }: { nav: NavKey }) {
   const { activeProject } = useProjects();
   const label = NAV.find((n) => n.key === nav)?.label ?? "";
   return (
-    <header className="flex h-[76px] shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-[60px]">
+    <header className="hidden h-[76px] shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-8 lg:flex lg:px-[60px]">
       <h1 className="text-lg font-semibold text-[var(--text)]">{label}</h1>
       {activeProject && (
         <>
@@ -116,9 +145,25 @@ function Topbar({ nav }: { nav: NavKey }) {
   );
 }
 
+/** Mobile top bar — hamburger + logo (hidden on lg+). */
+function MobileBar({ onMenu }: { onMenu: () => void }) {
+  return (
+    <header className="flex h-[60px] shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 lg:hidden">
+      <button
+        onClick={onMenu}
+        className="flex size-9 items-center justify-center rounded-lg text-[var(--text)] hover:bg-[var(--surface-2)]"
+        aria-label="פתיחת תפריט"
+      >
+        <Menu className="size-5" />
+      </button>
+      <Logo className="h-6 text-[var(--text)]" />
+    </header>
+  );
+}
+
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="flex flex-1 items-center justify-center p-[60px]">
+    <div className="flex flex-1 items-center justify-center p-6 sm:p-10 lg:p-[60px]">
       <div className="flex max-w-sm flex-col items-center text-center">
         <div className="mb-5 flex size-16 items-center justify-center rounded-2xl bg-[var(--surface-2)] text-[var(--text)]">
           <Globe className="size-8" />
@@ -160,7 +205,7 @@ function Overview() {
   if (!activeProject) return null;
   const fmt = (n: number | undefined) => (counts ? String(n ?? 0) : "…");
   return (
-    <div className="p-[60px]">
+    <div className="p-5 sm:p-8 lg:p-[60px]">
       <div className="mb-8">
         <a
           href={activeProject.site_url}
@@ -202,6 +247,7 @@ function DashboardInner() {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<{ postId: string | null } | null>(null);
   const [listKey, setListKey] = useState(0);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Complete the Google Search Console OAuth round-trip: the worker callback
   // bounces back to "/?gsc_code=…&gsc_state=…"; exchange it, then open Settings.
@@ -223,6 +269,7 @@ function DashboardInner() {
   function setNav(k: NavKey) {
     setEditing(null);
     setNavState(k);
+    setSidebarOpen(false);
   }
   function openEditor(postId: string | null) {
     setEditing({ postId });
@@ -262,8 +309,15 @@ function DashboardInner() {
 
   return (
     <div className="flex h-full">
-      <Sidebar active={nav} onNavigate={setNav} onAdd={() => setAddOpen(true)} />
+      <Sidebar
+        active={nav}
+        onNavigate={setNav}
+        onAdd={() => setAddOpen(true)}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
+        <MobileBar onMenu={() => setSidebarOpen(true)} />
         {showTopbar && <Topbar nav={nav} />}
         <main className="flex-1 overflow-y-auto bg-[var(--bg)]">
           {loading ? (

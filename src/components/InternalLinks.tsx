@@ -1,20 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import { FileText, Package, Plus, Tag as TagIcon } from "lucide-react";
-import { supabase } from "@/lib/supabase";
-
-interface Target {
-  wp_id: number;
-  type: string; // post | page | product_cat | product_tag
-  title: string;
-  url: string;
-  stems: Set<string>;
-  minRun: number;
-}
+import { useState } from "react";
+import { FileText, Package, Plus, Sparkles, Tag as TagIcon, Check } from "lucide-react";
+import { api } from "@/lib/api";
+import { Spinner } from "@/components/ui";
 
 interface Suggestion {
   anchor: string;
-  target: Target;
-  len: number;
+  target_url: string;
+  target_title: string;
+  target_type: string;
+  reason: string;
 }
 
 const TYPE_META: Record<string, { label: string; icon: typeof FileText }> = {
@@ -24,163 +18,106 @@ const TYPE_META: Record<string, { label: string; icon: typeof FileText }> = {
   product_tag: { label: "תגית מוצר", icon: TagIcon },
 };
 
-const PREFIX = "בהוכלמש";
-const STOP = new Set([
-  "של", "עם", "על", "או", "גם", "כל", "זה", "הוא", "היא", "כי", "אם", "יש", "לא",
-  "את", "אל", "כמו", "יותר", "רק", "אבל", "מה", "מי", "the", "and", "for", "מדריך",
-]);
-
-const stripSuffix = (w: string) => w.replace(/(יות|ות|ים)$/, "");
-
-/**
- * Candidate normalized forms of a word (len ≥ 3), with and without a leading
- * Hebrew prefix letter. Comparing candidate SETS (rather than stripping to a
- * single stem) avoids mangling roots that legitimately start with a prefix
- * letter — e.g. "כוסות" keeps the form "כוס" instead of losing the כ.
- */
-function forms(word: string): string[] {
-  const base = word.toLowerCase();
-  const out = new Set<string>();
-  out.add(stripSuffix(base));
-  if (base.length > 3 && PREFIX.includes(base[0])) out.add(stripSuffix(base.slice(1)));
-  return [...out].filter((s) => s.length >= 3);
-}
-
-interface Tok {
-  raw: string;
-  forms: string[];
-  start: number;
-  end: number;
-}
-function tokenize(text: string): Tok[] {
-  const toks: Tok[] = [];
-  const re = /[\p{L}\p{N}]+/gu;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    toks.push({ raw: m[0], forms: forms(m[0]), start: m.index, end: m.index + m[0].length });
-  }
-  return toks;
-}
-
-/** Removes anchor contents so already-linked text isn't suggested, then strips tags. */
-function toPlainText(html: string): string {
-  return html
-    .replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ");
-}
-
 export function InternalLinks({
   projectId,
   content,
+  title,
   onApply,
 }: {
   projectId: string;
   content: string;
+  title?: string;
   onApply: (anchor: string, url: string) => void;
 }) {
-  const [targets, setTargets] = useState<Target[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
+  const [inserted, setInserted] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    supabase
-      .from("link_targets")
-      .select("wp_id, type, title, url")
-      .eq("project_id", projectId)
-      .then(({ data }) => {
-        const rows = (data ?? []) as Omit<Target, "stems" | "minRun">[];
-        setTargets(
-          rows.map((t) => {
-            const stems = new Set(
-              tokenize(t.title)
-                .filter((w) => !STOP.has(stripSuffix(w.raw.toLowerCase())))
-                .flatMap((w) => w.forms)
-            );
-            return {
-              ...t,
-              stems,
-              minRun: t.type === "product_cat" || t.type === "product_tag" ? 1 : 2,
-            };
-          })
-        );
-      });
-  }, [projectId]);
-
-  // Scan the post text for phrases that match a target; suggest linking that
-  // exact phrase to that target (longest / most specific match per anchor).
-  const suggestions = useMemo<Suggestion[]>(() => {
-    const text = toPlainText(content);
-    const toks = tokenize(text);
-    if (!toks.length) return [];
-    const byAnchor = new Map<string, Suggestion>();
-
-    for (const target of targets) {
-      if (target.stems.size === 0) continue;
-      let best: { s: number; e: number; len: number } | null = null;
-      let runStart = -1;
-      for (let i = 0; i <= toks.length; i++) {
-        const ok =
-          i < toks.length && toks[i].forms.some((f) => target.stems.has(f));
-        if (ok) {
-          if (runStart === -1) runStart = i;
-        } else if (runStart !== -1) {
-          const len = i - runStart;
-          if (len >= target.minRun && (!best || len > best.len)) {
-            best = { s: runStart, e: i - 1, len };
-          }
-          runStart = -1;
-        }
-      }
-      if (!best) continue;
-      const anchor = text.slice(toks[best.s].start, toks[best.e].end).trim();
-      if (anchor.length < 2) continue;
-      const key = anchor.toLowerCase();
-      const existing = byAnchor.get(key);
-      // Prefer the longer / product-taxonomy match for a given anchor.
-      if (!existing || best.len > existing.len) {
-        byAnchor.set(key, { anchor, target, len: best.len });
-      }
+  async function analyze() {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await api<{ suggestions: Suggestion[] }>(
+        `/api/projects/${projectId}/internal-links`,
+        { content_html: content, title }
+      );
+      setSuggestions(r.suggestions);
+      setInserted(new Set());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "הניתוח נכשל");
+    } finally {
+      setLoading(false);
     }
+  }
 
-    return [...byAnchor.values()].sort((a, b) => b.len - a.len).slice(0, 20);
-  }, [content, targets]);
+  function apply(s: Suggestion) {
+    onApply(s.anchor, s.target_url);
+    setInserted((prev) => new Set(prev).add(s.anchor.toLowerCase()));
+  }
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-[var(--text)]">קישורים פנימיים מומלצים</h3>
-        <span className="text-xs text-[var(--muted)]">{targets.length} יעדים</span>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-[var(--text)]">קישורים פנימיים (AI)</h3>
+        <button
+          onClick={analyze}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs font-medium text-[var(--text)] transition-colors hover:bg-[var(--surface-2)] disabled:opacity-50"
+        >
+          {loading ? <Spinner className="size-3.5" /> : <Sparkles className="size-3.5" />}
+          {suggestions ? "נתח מחדש" : "נתח את הפוסט"}
+        </button>
       </div>
       <p className="text-xs text-[var(--muted)]">
-        המערכת מזהה בתוכן הפוסט ביטויים שכדאי לקשר. לחיצה מוסיפה את הקישור בעורך.
+        ה-AI קורא את הפוסט ואת כל היעדים באתר (עמודים, קטגוריות/תגיות מוצר, פוסטים) ומציע קישורים בעלי ערך אמיתי לגולש.
       </p>
 
-      {suggestions.length === 0 ? (
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+
+      {loading && (
+        <div className="flex items-center gap-2 py-3 text-xs text-[var(--muted)]">
+          <Spinner className="size-4" />
+          מנתח את הפוסט…
+        </div>
+      )}
+
+      {!loading && suggestions?.length === 0 && (
         <p className="py-3 text-center text-xs text-[var(--muted)]">
-          {targets.length === 0
-            ? "אין יעדים — סנכרן את האתר תחילה."
-            : "לא נמצאו ביטויים מתאימים בתוכן הנוכחי."}
+          ה-AI לא מצא קישורים בעלי ערך מובהק לפוסט הנוכחי.
         </p>
-      ) : (
+      )}
+
+      {!loading && suggestions && suggestions.length > 0 && (
         <ul className="space-y-1.5">
-          {suggestions.map((s) => {
-            const meta = TYPE_META[s.target.type] ?? { label: s.target.type, icon: FileText };
+          {suggestions.map((s, i) => {
+            const meta = TYPE_META[s.target_type] ?? { label: s.target_type, icon: FileText };
             const Icon = meta.icon;
+            const done = inserted.has(s.anchor.toLowerCase());
             return (
-              <li key={s.anchor + s.target.type + s.target.wp_id}>
+              <li key={s.anchor + i}>
                 <button
-                  onClick={() => onApply(s.anchor, s.target.url)}
-                  className="group flex w-full items-start gap-2 rounded-lg border border-[var(--border)] p-2 text-right transition-colors hover:bg-[var(--surface-2)]"
-                  title="הוסף קישור בעורך"
+                  onClick={() => apply(s)}
+                  disabled={done}
+                  className="group flex w-full items-start gap-2 rounded-lg border border-[var(--border)] p-2.5 text-right transition-colors enabled:hover:bg-[var(--surface-2)] disabled:opacity-60"
+                  title={done ? "נוסף" : "הוסף קישור בעורך"}
                 >
-                  <Plus className="mt-0.5 size-4 shrink-0 text-[var(--muted)] group-hover:text-[var(--text)]" />
+                  {done ? (
+                    <Check className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <Plus className="mt-0.5 size-4 shrink-0 text-[var(--muted)] group-hover:text-[var(--text)]" />
+                  )}
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm text-[var(--text)]">
-                      «{s.anchor}»
-                    </span>
+                    <span className="block text-sm text-[var(--text)]">«{s.anchor}»</span>
                     <span className="mt-0.5 flex items-center gap-1 text-xs text-[var(--muted)]">
-                      <Icon className="size-3" />
-                      {meta.label}: {s.target.title}
+                      <Icon className="size-3 shrink-0" />
+                      {meta.label}: {s.target_title}
                     </span>
+                    {s.reason && (
+                      <span className="mt-1 block text-xs leading-snug text-[var(--muted)]">
+                        {s.reason}
+                      </span>
+                    )}
                   </span>
                 </button>
               </li>

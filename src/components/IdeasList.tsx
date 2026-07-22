@@ -77,15 +77,15 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
   if (!activeProject) return null;
 
   return (
-    <div className="p-[60px]">
-      <div className="mb-5 flex items-center justify-between">
+    <div className="p-5 sm:p-8 lg:p-[60px]">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--text)]">רעיונות לפוסטים</h1>
           <p className="text-sm text-[var(--muted)]">
             Gemini מציע פוסטים חדשים על סמך מה שכבר נכתב באתר
           </p>
         </div>
-        <Button onClick={generate} loading={generating}>
+        <Button className="shrink-0" onClick={generate} loading={generating}>
           {!generating && <Sparkles className="size-4" />}
           הצע לי רעיונות חדשים
         </Button>
@@ -107,7 +107,7 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
       ) : (
         <div className="grid gap-3">
           {ideas.map((idea) => (
-            <Card key={idea.id} className="flex items-center justify-between gap-3 p-4">
+            <Card key={idea.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
               <span className="font-medium text-[var(--text)]">{idea.title}</span>
               <div className="flex shrink-0 items-center gap-2">
                 <Button size="sm" onClick={() => write(idea)} loading={writingId === idea.id}>

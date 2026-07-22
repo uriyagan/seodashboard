@@ -116,13 +116,13 @@ export function PostsList({
   if (!activeProject) return null;
 
   return (
-    <div className="p-[60px]">
-      <div className="mb-5 flex items-center justify-between">
+    <div className="p-5 sm:p-8 lg:p-[60px]">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--text)]">פוסטים</h1>
           <p className="text-sm text-[var(--muted)]">{posts.length} פוסטים בפרויקט</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex shrink-0 gap-2">
           <Button variant="outline" onClick={resync} loading={syncing}>
             {!syncing && <RefreshCw className="size-4" />}
             סנכרון מחדש
@@ -150,15 +150,15 @@ export function PostsList({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-right text-sm">
+            <table className="w-full min-w-[560px] text-right text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] text-[var(--muted)]">
                   <th className="px-4 py-3 font-medium">תמונה</th>
                   <th className="px-4 py-3 font-medium">כותרת</th>
                   <th className="px-4 py-3 font-medium">קטגוריות</th>
-                  <th className="px-4 py-3 font-medium">תגיות</th>
+                  <th className="hidden px-4 py-3 font-medium md:table-cell">תגיות</th>
                   <th className="px-4 py-3 font-medium">סטטוס</th>
-                  <th className="px-4 py-3 font-medium">תאריך</th>
+                  <th className="hidden px-4 py-3 font-medium sm:table-cell">תאריך</th>
                   <th className="px-4 py-3 font-medium" />
                 </tr>
               </thead>
@@ -174,10 +174,10 @@ export function PostsList({
                         <img
                           src={p.featured_thumb_url}
                           alt=""
-                          className="size-[100px] rounded-lg border border-[var(--border)] object-cover"
+                          className="size-16 rounded-lg border border-[var(--border)] object-cover sm:size-[100px]"
                         />
                       ) : (
-                        <div className="flex size-[100px] items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-[var(--muted)]">
+                        <div className="flex size-16 items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-[var(--muted)] sm:size-[100px]">
                           <ImageIcon className="size-5" />
                         </div>
                       )}
@@ -188,13 +188,13 @@ export function PostsList({
                     <td className="px-4 py-3">
                       <TermPills terms={p.categories} />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="hidden px-4 py-3 md:table-cell">
                       <TermPills terms={p.tags} />
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={p.wp_status} />
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-[var(--muted)]" dir="ltr">
+                    <td className="hidden whitespace-nowrap px-4 py-3 text-[var(--muted)] sm:table-cell" dir="ltr">
                       {(p.published_at ?? p.pushed_at)?.slice(0, 10) ?? "—"}
                     </td>
                     <td className="px-4 py-3">

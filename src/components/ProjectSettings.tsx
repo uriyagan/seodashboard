@@ -89,7 +89,7 @@ export function ProjectSettings() {
   }
 
   return (
-    <div className="p-[60px]">
+    <div className="p-5 sm:p-8 lg:p-[60px]">
       <h1 className="mb-1 text-2xl font-bold text-[var(--text)]">הגדרות פרויקט</h1>
       <p className="mb-6 text-sm text-[var(--muted)]" dir="ltr">{activeProject.site_url}</p>
 
@@ -192,8 +192,8 @@ export function ProjectSettings() {
         </Card>
       )}
 
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-2">
           <Button onClick={save} loading={busy === "save"}>
             <Save className="size-4" />
             שמירת הגדרות

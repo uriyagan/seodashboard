@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../index";
 import { requireAdmin } from "../lib/supabase";
 import { loadProject, projectAuth } from "../lib/project";
-import { generateArticle, generateImage } from "../lib/gemini";
+import { generateArticle, generateImage, suggestInternalLinks } from "../lib/gemini";
 import { uploadMedia } from "../lib/wordpress";
 
 export const ai = new Hono<{ Bindings: Env }>();
@@ -27,6 +27,51 @@ ai.post("/api/projects/:id/ai/write", async (c) => {
     return c.json({ ok: true, article });
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : "generate failed" }, 500);
+  }
+});
+
+/**
+ * AI internal-link suggestions: Gemini reads the post + the site's synced
+ * destinations (pages, product categories/tags, other posts) and proposes
+ * contextual links. Suggestions are validated so the anchor really appears in
+ * the post and the target is a known URL.
+ */
+ai.post("/api/projects/:id/internal-links", async (c) => {
+  const sb = await requireAdmin(c.env, c.req.raw);
+  if (!sb) return c.json({ error: "unauthorized" }, 401);
+  const projectId = c.req.param("id");
+
+  const { content_html, title } = await c.req.json<{ content_html: string; title?: string }>();
+  const plain = (content_html ?? "")
+    .replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, " ") // skip already-linked text
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const { data: targetRows } = await sb
+    .from("link_targets")
+    .select("type, title, url")
+    .eq("project_id", projectId)
+    .limit(500);
+  const targets = (targetRows ?? []) as { type: string; title: string; url: string }[];
+  const urlSet = new Set(targets.map((t) => t.url));
+
+  try {
+    const raw = await suggestInternalLinks(c.env, title ?? "", plain, targets);
+    // Keep only anchors that appear verbatim in the post and known targets; dedupe.
+    const seen = new Set<string>();
+    const suggestions = raw.filter((s) => {
+      const anchor = (s.anchor ?? "").trim();
+      const key = anchor.toLowerCase();
+      if (!anchor || anchor.length < 2 || seen.has(key)) return false;
+      if (!urlSet.has(s.target_url) || !plain.includes(anchor)) return false;
+      seen.add(key);
+      return true;
+    });
+    return c.json({ ok: true, suggestions });
+  } catch (e) {
+    return c.json({ ok: false, error: e instanceof Error ? e.message : "failed" }, 500);
   }
 });
 

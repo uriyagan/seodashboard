@@ -340,7 +340,7 @@ export function PostEditor({
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-[60px] py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:px-8 sm:py-4 lg:px-[60px]">
         <button
           onClick={onBack}
           className="flex items-center gap-1.5 text-sm font-medium text-[var(--muted)] hover:text-[var(--text)]"
@@ -348,9 +348,9 @@ export function PostEditor({
           <ArrowRight className="size-4" />
           חזרה לפוסטים
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-[var(--muted)]">סטטוס:</span>
+            <span className="hidden text-sm text-[var(--muted)] sm:inline">סטטוס:</span>
             <select
               value={state.status}
               onChange={(e) => set("status", e.target.value)}
@@ -375,7 +375,7 @@ export function PostEditor({
       </div>
 
       {/* Body */}
-      <div className="flex min-h-0 flex-1 flex-col p-[60px]">
+      <div className="flex min-h-0 flex-1 flex-col p-5 sm:p-8 lg:p-[60px]">
         {error && <div className="mb-4"><Alert>{error}</Alert></div>}
         {notice && <div className="mb-4"><Alert variant="success">{notice}</Alert></div>}
 
@@ -527,6 +527,7 @@ export function PostEditor({
               <InternalLinks
                 projectId={activeProject.id}
                 content={state.content_html}
+                title={state.title || state.seo_title}
                 onApply={applyLinkSuggestion}
               />
             </Card>
