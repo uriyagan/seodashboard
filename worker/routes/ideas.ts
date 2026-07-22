@@ -2,7 +2,12 @@ import { Hono } from "hono";
 import type { Env } from "../index";
 import { requireAdmin } from "../lib/supabase";
 import { loadProject, projectAuth } from "../lib/project";
-import { generateCategoryIdeas, generateArticle, generateImage } from "../lib/gemini";
+import {
+  generateCategoryIdeas,
+  generateArticle,
+  generateImage,
+  assignCategoriesToTitles,
+} from "../lib/gemini";
 import { uploadMedia } from "../lib/wordpress";
 import {
   loadProducts,
@@ -114,6 +119,60 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
       .select("id, title, status, created_at, product_category_name");
     if (error) throw error;
     return c.json({ ok: true, ideas: data });
+  } catch (e) {
+    return c.json({ ok: false, error: e instanceof Error ? e.message : "failed" }, 500);
+  }
+});
+
+/**
+ * Backfill: match existing articles (without a category) to the most relevant
+ * product category and save the association + top products (spec §1.2).
+ */
+ideas.post("/api/projects/:id/backfill-categories", async (c) => {
+  const sb = await requireAdmin(c.env, c.req.raw);
+  if (!sb) return c.json({ error: "unauthorized" }, 401);
+  const projectId = c.req.param("id");
+
+  const [products, names, postsRes] = await Promise.all([
+    loadProducts(sb, projectId),
+    categoryNames(sb, projectId),
+    sb
+      .from("posts")
+      .select("id, title")
+      .eq("project_id", projectId)
+      .is("product_category_id", null),
+  ]);
+
+  const posts = (postsRes.data ?? []) as { id: string; title: string }[];
+  const eligible = eligibleCategories(products, names, 5);
+  if (!posts.length) return c.json({ ok: true, updated: 0 });
+  if (!eligible.length) {
+    return c.json({ ok: false, error: "אין קטגוריות מוצרים עם מספיק מוצרים במלאי." }, 400);
+  }
+
+  try {
+    const assignments = await assignCategoriesToTitles(
+      c.env,
+      posts.map((p) => p.title),
+      eligible
+    );
+    let updated = 0;
+    await Promise.all(
+      posts.map(async (post, i) => {
+        const catId = assignments[i];
+        if (!catId) return;
+        await sb
+          .from("posts")
+          .update({
+            product_category_id: catId,
+            product_category_name: names.get(catId) ?? null,
+            product_names: topProductsForCategory(products, catId, 50),
+          })
+          .eq("id", post.id);
+        updated++;
+      })
+    );
+    return c.json({ ok: true, updated });
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : "failed" }, 500);
   }

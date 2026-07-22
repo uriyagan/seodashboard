@@ -16,7 +16,7 @@ export function ProjectSettings() {
   const [cadence, setCadence] = useState(1);
   const [stuckDays, setStuckDays] = useState(3);
   const [keywords, setKeywords] = useState<string[]>([]);
-  const [busy, setBusy] = useState<null | "save" | "sync" | "delete">(null);
+  const [busy, setBusy] = useState<null | "save" | "sync" | "delete" | "backfill">(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -68,6 +68,23 @@ export function ProjectSettings() {
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "הסנכרון נכשל");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function backfill() {
+    setBusy("backfill");
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await api<{ ok: boolean; updated?: number; error?: string }>(
+        `/api/projects/${activeProject!.id}/backfill-categories`
+      );
+      if (!r.ok) throw new Error(r.error);
+      setNotice(`שויכו ${r.updated ?? 0} מאמרים קיימים לקטגוריות מוצרים.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "השיוך נכשל");
     } finally {
       setBusy(null);
     }
@@ -153,6 +170,18 @@ export function ProjectSettings() {
             setKeywords((prev) => (prev.includes(kw) ? prev : [...prev, kw]))
           }
         />
+      </Card>
+
+      <Card className="mb-4 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-[var(--text)]">שיוך מאמרים לקטגוריות מוצרים</h2>
+          <p className="text-sm text-[var(--muted)]">
+            שיוך חד-פעמי של המאמרים הקיימים (שעדיין לא שויכו) לקטגוריית המוצרים המתאימה, לשימוש במנוע הרעיונות והכתיבה.
+          </p>
+        </div>
+        <Button variant="outline" className="shrink-0" onClick={backfill} loading={busy === "backfill"}>
+          שייך מאמרים קיימים
+        </Button>
       </Card>
 
       <Card className="mb-4 grid gap-4 p-5 sm:grid-cols-2">

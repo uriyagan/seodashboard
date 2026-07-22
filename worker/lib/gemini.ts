@@ -354,6 +354,65 @@ export async function pickCategoryForTitle(
   }
 }
 
+/**
+ * Bulk-matches existing article titles to product categories in one call
+ * (spec §1.2). Returns category ids aligned to the input titles (null = none).
+ */
+export async function assignCategoriesToTitles(
+  env: Env,
+  titles: string[],
+  categories: { id: number; name: string }[]
+): Promise<(number | null)[]> {
+  if (!titles.length || !categories.length) return titles.map(() => null);
+  const prompt = [
+    "שייך כל מאמר לקטגוריית המוצרים הרלוונטית ביותר מתוך הרשימה.",
+    "קטגוריות:",
+    categories.map((c) => `- category_id ${c.id} · "${c.name}"`).join("\n"),
+    "",
+    "מאמרים (index · כותרת):",
+    titles.map((t, i) => `${i} · ${t}`).join("\n"),
+    "",
+    "החזר JSON: { assignments: [{ index, category_id }] } — לכל מאמר את category_id המתאים ביותר מהרשימה.",
+  ].join("\n");
+
+  const data = await callGemini(env, textModel(env), {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "object",
+        properties: {
+          assignments: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { index: { type: "number" }, category_id: { type: "number" } },
+              required: ["index", "category_id"],
+            },
+          },
+        },
+        required: ["assignments"],
+      },
+      temperature: 0.1,
+    },
+  });
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const out: (number | null)[] = titles.map(() => null);
+  if (!text) return out;
+  try {
+    const valid = new Set(categories.map((c) => c.id));
+    for (const a of (JSON.parse(text) as { assignments: { index: number; category_id: number }[] })
+      .assignments ?? []) {
+      if (a.index >= 0 && a.index < out.length && valid.has(a.category_id)) {
+        out[a.index] = a.category_id;
+      }
+    }
+  } catch {
+    /* keep nulls */
+  }
+  return out;
+}
+
 export interface GeneratedImage {
   base64: string;
   mimeType: string;
