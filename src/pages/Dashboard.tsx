@@ -48,9 +48,9 @@ function Sidebar({
   const { user, signOut } = useAuth();
   return (
     <aside className="flex w-64 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)]">
-      {/* Logo */}
+      {/* Logo — stretched to the sidebar width */}
       <div className="flex h-[76px] shrink-0 items-center border-b border-[var(--border)] px-5">
-        <Logo className="h-5 w-auto text-[var(--text)]" />
+        <Logo className="w-full text-[var(--text)]" />
       </div>
 
       {/* Nav */}

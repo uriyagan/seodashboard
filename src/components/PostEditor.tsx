@@ -67,15 +67,26 @@ export function PostEditor({
       const { data } = await supabase.from("posts").select("*").eq("id", postId).single();
       if (data) {
         let content = data.content_html as string;
-        if (!content && data.wp_post_id) {
+        let featuredUrl = (data.featured_image_url as string) ?? "";
+        let featuredMedia: number | null = null;
+        // For synced posts (no local content yet) pull full content + featured image.
+        if ((!content || !featuredUrl) && data.wp_post_id) {
           try {
-            const r = await api<{ ok: boolean; post?: { content_html: string; focus_keyword: string; seo_title: string; meta_description: string } }>(
-              `/api/projects/${activeProject.id}/posts/${data.wp_post_id}`,
-              undefined,
-              "GET"
-            );
+            const r = await api<{
+              ok: boolean;
+              post?: {
+                content_html: string;
+                focus_keyword: string;
+                seo_title: string;
+                meta_description: string;
+                featured_image_url: string;
+                featured_media: number;
+              };
+            }>(`/api/projects/${activeProject.id}/posts/${data.wp_post_id}`, undefined, "GET");
             if (r.ok && r.post) {
-              content = r.post.content_html;
+              content = content || r.post.content_html;
+              featuredUrl = featuredUrl || r.post.featured_image_url;
+              featuredMedia = r.post.featured_media || null;
               data.focus_keyword ||= r.post.focus_keyword;
               data.seo_title ||= r.post.seo_title;
               data.meta_description ||= r.post.meta_description;
@@ -90,8 +101,8 @@ export function PostEditor({
           focus_keyword: data.focus_keyword ?? "",
           seo_title: data.seo_title ?? "",
           meta_description: data.meta_description ?? "",
-          featured_image_url: data.featured_image_url ?? "",
-          featured_media: null,
+          featured_image_url: featuredUrl,
+          featured_media: featuredMedia,
           categories: (data.categories ?? []) as Term[],
           tags: (data.tags ?? []) as Term[],
         });

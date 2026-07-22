@@ -222,9 +222,28 @@ export interface WpPostFull {
   categories: number[];
   tags: number[];
   featured_media: number;
+  featured_image_url: string;
   focus_keyword: string;
   seo_title: string;
   meta_description: string;
+}
+
+/** Resolves a media attachment's source URL by id. */
+export async function fetchMediaUrl(
+  auth: WpAuth,
+  mediaId: number,
+  runner?: CompanionRunner
+): Promise<string> {
+  if (!mediaId) return "";
+  try {
+    const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/media/${mediaId}`, {}, {
+      _fields: "source_url",
+    }, runner);
+    if (r.status >= 400) return "";
+    return (JSON.parse(r.text) as { source_url?: string }).source_url ?? "";
+  } catch {
+    return "";
+  }
 }
 
 /** Fetches a single post's full content + Yoast meta (context=edit). */
@@ -249,6 +268,7 @@ export async function fetchPostFull(
     meta?: Record<string, string>;
     yoast_head_json?: { title?: string; description?: string };
   };
+  const featured_media = p.featured_media ?? 0;
   return {
     id: p.id,
     title: p.title?.raw ?? p.title?.rendered ?? "",
@@ -256,7 +276,8 @@ export async function fetchPostFull(
     status: p.status,
     categories: p.categories ?? [],
     tags: p.tags ?? [],
-    featured_media: p.featured_media ?? 0,
+    featured_media,
+    featured_image_url: await fetchMediaUrl(auth, featured_media, runner),
     focus_keyword: p.meta?._yoast_wpseo_focuskw ?? "",
     seo_title: p.meta?._yoast_wpseo_title ?? p.yoast_head_json?.title ?? "",
     meta_description:
