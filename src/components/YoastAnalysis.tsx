@@ -74,7 +74,15 @@ export function YoastAnalysis({ input }: { input: AnalysisInput }) {
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [input.content, input.keyword, input.title, input.description, input.slug]);
+  }, [
+    input.content,
+    input.keyword,
+    input.title,
+    input.description,
+    input.slug,
+    input.titleWidth,
+    input.siteUrl,
+  ]);
 
   return (
     <div className="space-y-4">

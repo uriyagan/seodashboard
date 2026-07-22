@@ -23,6 +23,28 @@ export interface AnalysisInput {
   title: string;
   description: string;
   slug: string;
+  /** Full site URL (with hostname) — required so links to the same domain
+   *  are detected as internal (Yoast classifies links by permalink host). */
+  siteUrl: string;
+  /** SEO-title width in pixels (Yoast's title check uses px, not chars).
+   *  Measured on the main thread via measureTitleWidth; 0 in the worker. */
+  titleWidth: number;
+}
+
+/**
+ * Pixel width of the SEO title, matching Yoast's own measurement element
+ * (arial 20px / weight 400). Runs on the main thread only (needs a canvas);
+ * returns 0 where no DOM is available (e.g. inside the worker).
+ */
+let _measureCtx: CanvasRenderingContext2D | null = null;
+export function measureTitleWidth(title: string): number {
+  if (typeof document === "undefined") return 0;
+  if (!_measureCtx) {
+    _measureCtx = document.createElement("canvas").getContext("2d");
+    if (_measureCtx) _measureCtx.font = "400 20px arial";
+  }
+  if (!_measureCtx) return 0;
+  return Math.round(_measureCtx.measureText(title || "").width);
 }
 
 // Hebrew labels for each assessment identifier (fallback: the raw English text).
@@ -144,9 +166,11 @@ export async function analyzeYoast(input: AnalysisInput): Promise<Analysis> {
   const paper = new Paper(input.content || "", {
     keyword: input.keyword || "",
     title: input.title || "",
+    titleWidth: input.titleWidth || 0,
     description: input.description || "",
     slug: input.slug || "",
-    permalink: input.slug || "",
+    // Full URL (with hostname) so same-domain links count as internal.
+    permalink: input.siteUrl || "",
     locale: "he_IL",
   });
   const researcher = new Researcher(paper);

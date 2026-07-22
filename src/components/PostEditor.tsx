@@ -18,6 +18,16 @@ import { TermSelect, type Term } from "@/components/TermSelect";
 import { RichEditor } from "@/components/RichEditor";
 import { YoastAnalysis } from "@/components/YoastAnalysis";
 import { InternalLinks } from "@/components/InternalLinks";
+import { measureTitleWidth } from "@/lib/yoast";
+
+/** Approximate the post slug from its title (keeps Hebrew letters). */
+function slugify(s: string): string {
+  return (s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 interface EditorState {
   id: string | null;
@@ -540,7 +550,9 @@ export function PostEditor({
                   keyword: state.focus_keyword,
                   title: state.seo_title || state.title,
                   description: state.meta_description,
-                  slug: "",
+                  slug: slugify(state.seo_title || state.title),
+                  siteUrl: activeProject.site_url,
+                  titleWidth: measureTitleWidth(state.seo_title || state.title),
                 }}
               />
             </Card>
