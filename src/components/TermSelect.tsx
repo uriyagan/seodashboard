@@ -34,6 +34,8 @@ export function TermSelect({
   const [creating, setCreating] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  const [usedIds, setUsedIds] = useState<Set<number>>(new Set());
+
   useEffect(() => {
     supabase
       .from("wp_terms")
@@ -46,6 +48,23 @@ export function TermSelect({
       });
   }, [projectId, taxonomy]);
 
+  // Only offer terms that blog POSTS actually use — this excludes product-only
+  // categories/tags that live in the same WP taxonomy but never touch the blog.
+  useEffect(() => {
+    const col = apiTaxonomy === "categories" ? "categories" : "tags";
+    supabase
+      .from("posts")
+      .select(col)
+      .eq("project_id", projectId)
+      .then(({ data }) => {
+        const ids = new Set<number>();
+        for (const row of (data ?? []) as Record<string, { id: number }[]>[]) {
+          for (const t of row[col] ?? []) if (t?.id != null) ids.add(t.id);
+        }
+        setUsedIds(ids);
+      });
+  }, [projectId, apiTaxonomy]);
+
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
@@ -56,7 +75,10 @@ export function TermSelect({
 
   const selectedIds = new Set(selected.map((t) => t.id));
   const filtered = all.filter(
-    (t) => !selectedIds.has(t.id) && t.name.toLowerCase().includes(query.toLowerCase())
+    (t) =>
+      !selectedIds.has(t.id) &&
+      usedIds.has(t.id) &&
+      t.name.toLowerCase().includes(query.toLowerCase())
   );
   const exactExists = all.some((t) => t.name.toLowerCase() === query.trim().toLowerCase());
 

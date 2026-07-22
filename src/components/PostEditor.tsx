@@ -258,30 +258,30 @@ export function PostEditor({
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto p-[60px]">
+      <div className="flex min-h-0 flex-1 flex-col p-[60px]">
         {error && <div className="mb-4"><Alert>{error}</Alert></div>}
         {notice && <div className="mb-4"><Alert variant="success">{notice}</Alert></div>}
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-          {/* Main */}
-          <div className="space-y-4">
-            <div>
-              <Input
-                value={state.title}
-                onChange={(e) => set("title", e.target.value)}
-                placeholder="כותרת הפוסט"
-                className="h-14 !text-xl font-bold"
-              />
-            </div>
+        <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[1fr_340px]">
+          {/* Main — fills to the bottom; the editor scrolls internally */}
+          <div className="flex min-h-0 flex-col gap-4">
+            <Input
+              value={state.title}
+              onChange={(e) => set("title", e.target.value)}
+              placeholder="כותרת הפוסט"
+              className="h-14 !text-xl font-bold"
+            />
             <Button variant="outline" onClick={onWriteAI} loading={busy === "write"} className="w-full">
               <Wand2 className="size-4" />
               כתוב את הפוסט עם Gemini (לפי הכותרת)
             </Button>
-            <RichEditor value={state.content_html} onChange={(html) => set("content_html", html)} />
+            <div className="min-h-0 flex-1">
+              <RichEditor value={state.content_html} onChange={(html) => set("content_html", html)} />
+            </div>
           </div>
 
-          {/* Sidebar */}
-          <div className="space-y-4">
+          {/* Sidebar — scrolls independently */}
+          <div className="space-y-4 overflow-y-auto">
             {/* Featured image */}
             <Card className="p-4">
               <h3 className="mb-3 text-sm font-semibold text-[var(--text)]">תמונה ראשית</h3>

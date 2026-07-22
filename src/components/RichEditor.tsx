@@ -38,7 +38,7 @@ export function RichEditor({
       onEditorChange={onChange}
       licenseKey="gpl"
       init={{
-        height: 520,
+        height: "100%",
         menubar: true,
         skin: false,
         content_css: false,
@@ -48,7 +48,18 @@ export function RichEditor({
         content_style: [
           contentCss,
           contentUiCss,
-          "body{font-family:Assistant,Arial,sans-serif;direction:rtl;font-size:16px;line-height:1.7}",
+          // Load Google Sans inside the editor iframe.
+          "@font-face{font-family:'Google Sans';src:url('/fonts/GoogleSans.woff2') format('woff2');font-weight:100 900;font-display:swap}",
+          // Font sizes matched to the live site rendering.
+          "body{font-family:'Google Sans',Arial,sans-serif;direction:rtl;font-size:18px;line-height:1.7;margin:1rem}",
+          "p{font-size:18px}",
+          "h1{font-size:60px;line-height:1.1}",
+          "h2{font-size:50px;line-height:1.15}",
+          "h3{font-size:40px;line-height:1.2}",
+          "h4{font-size:30px;line-height:1.25}",
+          // Fit media to the editor width (no horizontal scroll).
+          "img,video,iframe{max-width:100%;height:auto}",
+          "table{max-width:100%;table-layout:fixed;word-break:break-word}",
         ].join("\n"),
         plugins: [
           "advlist",
