@@ -17,7 +17,10 @@ companion.post("/api/companion/health", async (c) => {
 
 companion.post("/api/companion/claim", async (c) => {
   const { token, limit } = await c.req.json<{ token: string; limit?: number }>();
-  const { data, error } = await anonClient(c.env).rpc("companion_claim", {
+  const sb = anonClient(c.env);
+  // Diagnostic: record that a claim reached us (token prefix + match flag).
+  await sb.rpc("companion_log_claim", { p_token: token });
+  const { data, error } = await sb.rpc("companion_claim", {
     p_token: token,
     p_limit: limit ?? 10,
   });
