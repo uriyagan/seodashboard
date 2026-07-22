@@ -6,7 +6,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const gsc = new Hono<{ Bindings: Env }>();
 
-const SCOPES = "openid email https://www.googleapis.com/auth/webmasters.readonly";
+const SCOPES =
+  "openid email https://www.googleapis.com/auth/webmasters.readonly https://www.googleapis.com/auth/analytics.readonly";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 
@@ -251,6 +252,184 @@ gsc.post("/api/gsc/disconnect", async (c) => {
     await sb.from("gsc_connections").delete().eq("admin_id", userData.user.id);
   }
   return c.json({ ok: true });
+});
+
+/** List the connected account's GA4 properties (Admin API). */
+gsc.get("/api/gsc/ga-properties", async (c) => {
+  const sb = await requireAdmin(c.env, c.req.raw);
+  if (!sb) return c.json({ error: "unauthorized" }, 401);
+  const at = await accessToken(c.env, sb);
+  if (!at) return c.json({ error: "לא מחובר ל-Google" }, 400);
+
+  const res = await fetch(
+    "https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200",
+    { headers: { Authorization: `Bearer ${at.token}` } }
+  );
+  if (!res.ok) return c.json({ error: "שליפת נכסי Analytics נכשלה" }, 500);
+  const body = (await res.json()) as {
+    accountSummaries?: {
+      displayName?: string;
+      propertySummaries?: { property: string; displayName: string }[];
+    }[];
+  };
+  const properties = (body.accountSummaries ?? []).flatMap((a) =>
+    (a.propertySummaries ?? []).map((p) => ({
+      property: p.property, // "properties/123456789"
+      label: `${p.displayName}${a.displayName ? ` · ${a.displayName}` : ""}`,
+    }))
+  );
+  return c.json({ ok: true, properties });
+});
+
+// ---- date helpers (last 28 days vs the 28 days before) ----
+function fmtDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+function periods() {
+  const DAY = 24 * 60 * 60 * 1000;
+  const end = new Date();
+  const curStart = new Date(end.getTime() - 27 * DAY);
+  const prevEnd = new Date(end.getTime() - 28 * DAY);
+  const prevStart = new Date(end.getTime() - 55 * DAY);
+  return {
+    curStart: fmtDate(curStart),
+    curEnd: fmtDate(end),
+    prevStart: fmtDate(prevStart),
+    prevEnd: fmtDate(prevEnd),
+  };
+}
+
+async function scQuery(
+  token: string,
+  property: string,
+  body: Record<string, unknown>
+): Promise<{ rows?: { keys?: string[]; clicks: number; impressions: number; ctr: number; position: number }[] }> {
+  const res = await fetch(
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(
+      property
+    )}/searchAnalytics/query`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+  if (!res.ok) return {};
+  return res.json();
+}
+
+async function gaReport(
+  token: string,
+  property: string,
+  body: Record<string, unknown>
+): Promise<{ rows?: { dimensionValues?: { value: string }[]; metricValues?: { value: string }[] }[] }> {
+  const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/${property}:runReport`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return {};
+  return res.json();
+}
+
+const ORGANIC_FILTER = {
+  filter: {
+    fieldName: "sessionDefaultChannelGroup",
+    stringFilter: { matchType: "EXACT", value: "Organic Search" },
+  },
+};
+
+/** Combined organic-traffic overview (Search Console + GA4) for the dashboard. */
+gsc.get("/api/projects/:id/overview", async (c) => {
+  const sb = await requireAdmin(c.env, c.req.raw);
+  if (!sb) return c.json({ error: "unauthorized" }, 401);
+
+  const { data: proj } = await sb
+    .from("projects")
+    .select("gsc_property, ga_property")
+    .eq("id", c.req.param("id"))
+    .single();
+  const gscProp = (proj as { gsc_property: string | null } | null)?.gsc_property;
+  const gaProp = (proj as { ga_property: string | null } | null)?.ga_property;
+
+  const at = await accessToken(c.env, sb);
+  if (!at) return c.json({ connected: false });
+  const token = at.token;
+  const p = periods();
+
+  // ---- Search Console (organic search performance) ----
+  const gscPromise = (async () => {
+    if (!gscProp) return null;
+    const [cur, prev, series, top] = await Promise.all([
+      scQuery(token, gscProp, { startDate: p.curStart, endDate: p.curEnd }),
+      scQuery(token, gscProp, { startDate: p.prevStart, endDate: p.prevEnd }),
+      scQuery(token, gscProp, { startDate: p.curStart, endDate: p.curEnd, dimensions: ["date"] }),
+      scQuery(token, gscProp, {
+        startDate: p.curStart,
+        endDate: p.curEnd,
+        dimensions: ["query"],
+        rowLimit: 10,
+      }),
+    ]);
+    const t = (r: typeof cur) => r.rows?.[0] ?? { clicks: 0, impressions: 0, ctr: 0, position: 0 };
+    return {
+      property: gscProp,
+      totals: t(cur),
+      prev: t(prev),
+      series: (series.rows ?? []).map((r) => ({
+        date: r.keys?.[0] ?? "",
+        clicks: r.clicks,
+        impressions: r.impressions,
+      })),
+      topQueries: (top.rows ?? []).map((r) => ({
+        query: r.keys?.[0] ?? "",
+        clicks: r.clicks,
+        impressions: r.impressions,
+        position: r.position,
+      })),
+    };
+  })();
+
+  // ---- GA4 (organic-search sessions & users) ----
+  const gaPromise = (async () => {
+    if (!gaProp) return null;
+    const [curSeries, prev] = await Promise.all([
+      gaReport(token, gaProp, {
+        dateRanges: [{ startDate: p.curStart, endDate: p.curEnd }],
+        dimensions: [{ name: "date" }],
+        metrics: [{ name: "sessions" }, { name: "totalUsers" }],
+        dimensionFilter: ORGANIC_FILTER,
+        orderBys: [{ dimension: { dimensionName: "date" } }],
+      }),
+      gaReport(token, gaProp, {
+        dateRanges: [{ startDate: p.prevStart, endDate: p.prevEnd }],
+        metrics: [{ name: "sessions" }, { name: "totalUsers" }],
+        dimensionFilter: ORGANIC_FILTER,
+      }),
+    ]);
+    const series = (curSeries.rows ?? []).map((r) => ({
+      date: r.dimensionValues?.[0]?.value ?? "",
+      sessions: Number(r.metricValues?.[0]?.value ?? 0),
+      users: Number(r.metricValues?.[1]?.value ?? 0),
+    }));
+    const totals = series.reduce(
+      (acc, r) => ({ sessions: acc.sessions + r.sessions, users: acc.users + r.users }),
+      { sessions: 0, users: 0 }
+    );
+    const prevRow = prev.rows?.[0];
+    return {
+      property: gaProp,
+      totals,
+      prev: {
+        sessions: Number(prevRow?.metricValues?.[0]?.value ?? 0),
+        users: Number(prevRow?.metricValues?.[1]?.value ?? 0),
+      },
+      series: series.map((r) => ({ date: r.date, sessions: r.sessions })),
+    };
+  })();
+
+  const [gscData, gaData] = await Promise.all([gscPromise, gaPromise]);
+  return c.json({ connected: true, gsc: gscData, ga: gaData });
 });
 
 /** Top search queries for a project's mapped property (last 90 days). */

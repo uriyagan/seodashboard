@@ -19,6 +19,7 @@ import { AddSiteWizard } from "@/components/AddSiteWizard";
 import { PostsList } from "@/components/PostsList";
 import { IdeasList } from "@/components/IdeasList";
 import { ProjectSettings } from "@/components/ProjectSettings";
+import { OrganicOverview } from "@/components/OrganicOverview";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 // TinyMCE is heavy — load the editor only when needed.
@@ -186,6 +187,10 @@ function Overview() {
             <p className="mt-2 text-2xl font-semibold text-[var(--text)]">{value}</p>
           </Card>
         ))}
+      </div>
+
+      <div className="mt-8">
+        <OrganicOverview projectId={activeProject.id} />
       </div>
     </div>
   );

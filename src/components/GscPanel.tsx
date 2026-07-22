@@ -28,8 +28,9 @@ export function GscPanel({
     null
   );
   const [sites, setSites] = useState<string[]>([]);
+  const [gaProps, setGaProps] = useState<{ property: string; label: string }[]>([]);
   const [rows, setRows] = useState<Row[] | null>(null);
-  const [busy, setBusy] = useState<null | "connect" | "keywords" | "property">(null);
+  const [busy, setBusy] = useState<null | "connect" | "keywords" | "property" | "ga">(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,12 +39,19 @@ export function GscPanel({
       .catch(() => setStatus({ connected: false, google_email: null }));
   }, []);
 
-  // Once connected, load the account's properties for the selector.
+  // Once connected, load the account's Search Console + GA4 properties.
   useEffect(() => {
     if (!status?.connected) return;
     api<{ sites: string[] }>("/api/gsc/sites", undefined, "GET")
       .then((r) => setSites(r.sites))
       .catch((e) => setError(e.message));
+    api<{ properties: { property: string; label: string }[] }>(
+      "/api/gsc/ga-properties",
+      undefined,
+      "GET"
+    )
+      .then((r) => setGaProps(r.properties))
+      .catch(() => {});
   }, [status?.connected]);
 
   async function connect() {
@@ -78,6 +86,18 @@ export function GscPanel({
       await reload();
       setRows(null);
     }
+    setBusy(null);
+  }
+
+  async function setGaProperty(property: string) {
+    setBusy("ga");
+    setError(null);
+    const { error } = await supabase
+      .from("projects")
+      .update({ ga_property: property || null })
+      .eq("id", project.id);
+    if (error) setError(error.message);
+    else await reload();
     setBusy(null);
   }
 
@@ -147,6 +167,26 @@ export function GscPanel({
               {sites.map((s) => (
                 <option key={s} value={s}>
                   {s}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[var(--text)]">
+              נכס Google Analytics (GA4) של הפרויקט
+            </label>
+            <select
+              value={project.ga_property ?? ""}
+              onChange={(e) => setGaProperty(e.target.value)}
+              disabled={busy === "ga"}
+              dir="ltr"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus-visible:border-[var(--brand)] focus-visible:ring-2 focus-visible:ring-[var(--brand)]/40"
+            >
+              <option value="">— בחר נכס —</option>
+              {gaProps.map((g) => (
+                <option key={g.property} value={g.property}>
+                  {g.label}
                 </option>
               ))}
             </select>

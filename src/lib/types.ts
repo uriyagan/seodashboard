@@ -12,6 +12,7 @@ export interface Project {
   yoast_ready: boolean;
   companion_token: string | null;
   gsc_property: string | null;
+  ga_property: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
