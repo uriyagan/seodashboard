@@ -19,6 +19,7 @@ import {
   type LinkTarget,
 } from "../lib/wordpress";
 import { makeCompanionRunner, type CompanionRunner } from "../lib/companion";
+import { relayFrom } from "../lib/project";
 
 export const projects = new Hono<{ Bindings: Env }>();
 
@@ -65,6 +66,7 @@ projects.post("/api/projects/test-connection", async (c) => {
     siteUrl: body.url,
     username: body.username,
     appPassword: body.appPassword,
+    relay: relayFrom(c.env),
   };
   const conn = await testConnection(auth);
   // Firewalled: credentials can't be verified directly; the companion will.
@@ -220,6 +222,7 @@ projects.post("/api/projects/connect", async (c) => {
     siteUrl: body.url.replace(/\/+$/, ""),
     username: body.username,
     appPassword: body.appPassword,
+    relay: relayFrom(c.env),
   };
 
   // Re-verify before saving. A firewall block is not a hard failure — we'll
@@ -286,6 +289,7 @@ projects.post("/api/projects/:id/sync", async (c) => {
     siteUrl: proj.site_url,
     username: proj.wp_username,
     appPassword: await decrypt(proj.wp_app_password_encrypted, c.env.ENCRYPTION_KEY!),
+    relay: relayFrom(c.env),
   };
 
   // Direct first; if the host firewall blocks us, the companion queue takes over.

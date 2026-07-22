@@ -13,10 +13,19 @@
 
 import type { CompanionRunner } from "./companion";
 
+export interface RelayConfig {
+  /** Full URL of the static-IP relay endpoint. */
+  url: string;
+  /** Shared secret that authorizes relay requests. */
+  secret: string;
+}
+
 export interface WpAuth {
   siteUrl: string;
   username: string;
   appPassword: string;
+  /** Optional static-IP relay: retries a blocked request from a whitelisted IP. */
+  relay?: RelayConfig;
 }
 
 export interface WpTerm {
@@ -118,8 +127,57 @@ async function wpFetch(
     return { status: res.status, headers: res.headers, text };
   }
 
-  // Both direct forms blocked. Last resort: run it inside the site via the
-  // companion queue (the site's snippet polls us, runs it, posts back).
+  // Direct forms blocked. Preferred fallback: replay the same request through
+  // the static-IP relay (whitelisted in the host's anti-bot) — real-time, no
+  // per-site snippet. The relay fetches server-side and returns the response.
+  if (auth?.relay) {
+    for (const url of buildUrls(siteUrl, route, query)) {
+      try {
+        const rr = await fetch(auth.relay.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            secret: auth.relay.secret,
+            url,
+            method: (init.method as string) ?? "GET",
+            headers,
+            body: typeof init.body === "string" ? init.body : undefined,
+          }),
+        });
+        if (!rr.ok) {
+          lastErr = `relay HTTP ${rr.status}`;
+          continue;
+        }
+        const payload = (await rr.json()) as {
+          status: number;
+          headers?: Record<string, string>;
+          body?: string;
+        };
+        const trimmed = (payload.body ?? "").trim();
+        if (trimmed === "") {
+          if (payload.status < 400) return { status: payload.status, headers: new Headers(), text: "" };
+          lastErr = `relay HTTP ${payload.status}`;
+          continue;
+        }
+        try {
+          JSON.parse(trimmed);
+        } catch {
+          lastErr = `relay: blocked by host (HTTP ${payload.status})`;
+          continue; // still an HTML challenge — relay IP not whitelisted yet
+        }
+        const h = new Headers();
+        for (const [k, v] of Object.entries(payload.headers ?? {})) {
+          if (v != null) h.set(k, String(v));
+        }
+        return { status: payload.status, headers: h, text: payload.body ?? "" };
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : "relay failed";
+      }
+    }
+  }
+
+  // Last resort: run it inside the site via the companion queue (the site's
+  // snippet polls us, runs it, posts back).
   if (runner) {
     const bodyStr = typeof init.body === "string" ? init.body : undefined;
     let bodyObj: unknown;

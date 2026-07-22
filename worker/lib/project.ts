@@ -1,7 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Env } from "../index";
 import { decrypt } from "./crypto";
-import type { WpAuth } from "./wordpress";
+import type { WpAuth, RelayConfig } from "./wordpress";
+
+/** Global static-IP relay config from env (undefined if not configured). */
+export function relayFrom(env: Env): RelayConfig | undefined {
+  return env.RELAY_URL && env.RELAY_SECRET
+    ? { url: env.RELAY_URL, secret: env.RELAY_SECRET }
+    : undefined;
+}
 
 export interface ProjectRow {
   id: string;
@@ -42,5 +49,6 @@ export async function projectAuth(env: Env, project: ProjectRow): Promise<WpAuth
     siteUrl: project.site_url,
     username: project.wp_username,
     appPassword: await decrypt(project.wp_app_password_encrypted, env.ENCRYPTION_KEY!),
+    relay: relayFrom(env),
   };
 }

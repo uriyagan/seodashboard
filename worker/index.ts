@@ -28,6 +28,8 @@ export interface Env {
   APP_URL?: string;
   GSC_CLIENT_ID?: string;
   GSC_CLIENT_SECRET?: string;
+  RELAY_URL?: string;
+  RELAY_SECRET?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
