@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
 import { Alert, Button, Card, Input, Label } from "@/components/ui";
 import { CompanionSnippet } from "@/components/CompanionSnippet";
+import { KeywordsInput } from "@/components/KeywordsInput";
 
 export function ProjectSettings() {
   const { activeProject, reload, setActiveId, projects } = useProjects();
@@ -13,6 +14,7 @@ export function ProjectSettings() {
   const [imagePrompt, setImagePrompt] = useState("");
   const [cadence, setCadence] = useState(1);
   const [stuckDays, setStuckDays] = useState(3);
+  const [keywords, setKeywords] = useState<string[]>([]);
   const [busy, setBusy] = useState<null | "save" | "sync" | "delete">(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -24,6 +26,7 @@ export function ProjectSettings() {
     setImagePrompt(activeProject.image_prompt ?? "");
     setCadence(activeProject.cadence_per_week ?? 1);
     setStuckDays(activeProject.stuck_draft_days ?? 3);
+    setKeywords(activeProject.keywords ?? []);
   }, [activeProject]);
 
   if (!activeProject) return null;
@@ -38,6 +41,7 @@ export function ProjectSettings() {
         name: name.trim(),
         content_prompt: contentPrompt,
         image_prompt: imagePrompt,
+        keywords,
         cadence_per_week: cadence,
         stuck_draft_days: stuckDays,
       })
@@ -122,6 +126,16 @@ export function ProjectSettings() {
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm leading-relaxed outline-none focus-visible:border-[var(--brand)] focus-visible:ring-2 focus-visible:ring-[var(--brand)]/40"
           />
         </div>
+      </Card>
+
+      <Card className="mb-4 space-y-3 p-5">
+        <div>
+          <h2 className="text-base font-semibold text-[var(--text)]">מילות מפתח של העסק</h2>
+          <p className="text-sm text-[var(--muted)]">
+            כל ביטויי החיפוש הרלוונטיים לעסק. ה-AI יבחר את המתאים ביותר לכל פוסט.
+          </p>
+        </div>
+        <KeywordsInput value={keywords} onChange={setKeywords} />
       </Card>
 
       <Card className="mb-4 grid gap-4 p-5 sm:grid-cols-2">

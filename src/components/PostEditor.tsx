@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   ImagePlus,
+  Package,
   Save,
   Sparkles,
   Upload,
   UploadCloud,
   Wand2,
+  X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { api } from "@/lib/api";
@@ -15,6 +17,7 @@ import { Alert, Button, Card, Input, Label, Spinner } from "@/components/ui";
 import { TermSelect, type Term } from "@/components/TermSelect";
 import { RichEditor } from "@/components/RichEditor";
 import { YoastAnalysis } from "@/components/YoastAnalysis";
+import { InternalLinks } from "@/components/InternalLinks";
 
 interface EditorState {
   id: string | null;
@@ -58,9 +61,27 @@ export function PostEditor({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const productInputRef = useRef<HTMLInputElement>(null);
+  const [productRef, setProductRef] = useState<{
+    base64: string;
+    mimeType: string;
+    preview: string;
+  } | null>(null);
+  const editorRef = useRef<{
+    selection: { getContent: () => string };
+    insertContent: (html: string) => void;
+  } | null>(null);
 
   const set = <K extends keyof EditorState>(k: K, v: EditorState[K]) =>
     setState((s) => ({ ...s, [k]: v }));
+
+  function insertInternalLink(url: string, title: string) {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const sel = ed.selection.getContent();
+    const text = sel || title;
+    ed.insertContent(`<a href="${url}">${text}</a>`);
+  }
 
   // Load existing post (local row; fetch WP content if empty).
   useEffect(() => {
@@ -249,6 +270,19 @@ export function PostEditor({
     }
   }
 
+  async function onAttachProduct(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    setProductRef({ base64, mimeType: file.type || "image/png", preview: URL.createObjectURL(file) });
+  }
+
   async function onGenImage() {
     setBusy("image");
     setError(null);
@@ -256,7 +290,12 @@ export function PostEditor({
     try {
       const r = await api<{ ok: boolean; url?: string; mediaId?: number; error?: string }>(
         `/api/projects/${activeProject!.id}/ai/image`,
-        { specific: `תמונה ראשית לפוסט: ${state.title}`, role: "featured", upload: true }
+        {
+          specific: `תמונה ראשית לפוסט: ${state.title}`,
+          role: "featured",
+          upload: true,
+          refImages: productRef ? [{ base64: productRef.base64, mimeType: productRef.mimeType }] : [],
+        }
       );
       if (!r.ok || !r.url) throw new Error(r.error || "יצירת התמונה נכשלה");
       set("featured_image_url", r.url);
@@ -319,7 +358,11 @@ export function PostEditor({
               כתוב את הפוסט עם Gemini (לפי הכותרת)
             </Button>
             <div className="min-h-0 flex-1">
-              <RichEditor value={state.content_html} onChange={(html) => set("content_html", html)} />
+              <RichEditor
+                value={state.content_html}
+                onChange={(html) => set("content_html", html)}
+                onInit={(ed) => (editorRef.current = ed)}
+              />
             </div>
           </div>
 
@@ -340,6 +383,42 @@ export function PostEditor({
                 </div>
               )}
               <div className="space-y-2">
+                {/* Optional product reference for AI generation */}
+                <div className="flex items-center gap-2 rounded-lg border border-[var(--border)] p-2">
+                  {productRef ? (
+                    <img
+                      src={productRef.preview}
+                      alt="מוצר"
+                      className="size-10 shrink-0 rounded-md border border-[var(--border)] object-cover"
+                    />
+                  ) : (
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-dashed border-[var(--border)] text-[var(--muted)]">
+                      <Package className="size-4" />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => productInputRef.current?.click()}
+                    className="flex-1 text-right text-xs text-[var(--brand)] hover:underline"
+                  >
+                    {productRef ? "החלף מוצר לשילוב" : "צרף מוצר לשילוב בתמונה"}
+                  </button>
+                  {productRef && (
+                    <button
+                      onClick={() => setProductRef(null)}
+                      className="text-[var(--muted)] hover:text-[var(--text)]"
+                      aria-label="הסרה"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  )}
+                  <input
+                    ref={productInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={onAttachProduct}
+                  />
+                </div>
                 <Button variant="outline" onClick={onGenImage} loading={busy === "image"} className="w-full">
                   <Sparkles className="size-4" />
                   צור תמונה (Nano Banana 2)
@@ -405,6 +484,15 @@ export function PostEditor({
                 />
                 <p className="mt-1 text-xs text-[var(--muted)]">{state.meta_description.length} תווים</p>
               </div>
+            </Card>
+
+            {/* Internal link suggestions */}
+            <Card className="p-4">
+              <InternalLinks
+                projectId={activeProject.id}
+                context={`${state.seo_title || state.title} ${state.focus_keyword} ${state.content_html}`}
+                onInsert={insertInternalLink}
+              />
             </Card>
 
             {/* Live Yoast analysis */}

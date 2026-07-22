@@ -28,14 +28,17 @@ import contentUiCss from "tinymce/skins/ui/oxide/content.min.css?raw";
 export function RichEditor({
   value,
   onChange,
+  onInit,
 }: {
   value: string;
   onChange: (html: string) => void;
+  onInit?: (editor: { selection: { getContent: () => string }; insertContent: (html: string) => void }) => void;
 }) {
   return (
     <Editor
       value={value}
       onEditorChange={onChange}
+      onInit={(_evt, editor) => onInit?.(editor as never)}
       licenseKey="gpl"
       init={{
         height: "100%",

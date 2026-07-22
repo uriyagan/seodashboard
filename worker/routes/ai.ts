@@ -18,7 +18,12 @@ ai.post("/api/projects/:id/ai/write", async (c) => {
   if (!topic?.trim()) return c.json({ ok: false, error: "missing topic" }, 400);
 
   try {
-    const article = await generateArticle(c.env, project.content_prompt, topic.trim());
+    const article = await generateArticle(
+      c.env,
+      project.content_prompt,
+      topic.trim(),
+      project.keywords
+    );
     return c.json({ ok: true, article });
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : "generate failed" }, 500);
@@ -36,14 +41,15 @@ ai.post("/api/projects/:id/ai/image", async (c) => {
   const project = await loadProject(sb, projectId);
   if (!project) return c.json({ error: "project not found" }, 404);
 
-  const { specific, role, upload } = await c.req.json<{
+  const { specific, role, upload, refImages } = await c.req.json<{
     specific: string;
     role?: "featured" | "body";
     upload?: boolean;
+    refImages?: { base64: string; mimeType: string }[];
   }>();
 
   try {
-    const img = await generateImage(c.env, project.image_prompt, specific ?? "");
+    const img = await generateImage(c.env, project.image_prompt, specific ?? "", refImages ?? []);
 
     // Optionally upload to WordPress media (needed for a usable URL on the site).
     if (upload !== false) {

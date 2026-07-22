@@ -5,6 +5,7 @@ export interface Project {
   wp_username: string | null;
   content_prompt: string;
   image_prompt: string;
+  keywords: string[];
   cadence_per_week: number;
   stuck_draft_days: number;
   last_post_at: string | null;

@@ -57,7 +57,12 @@ ideas.post("/api/projects/:id/ideas/:ideaId/write", async (c) => {
 
   try {
     // 1. Article
-    const article = await generateArticle(c.env, project.content_prompt, idea.title);
+    const article = await generateArticle(
+      c.env,
+      project.content_prompt,
+      idea.title,
+      project.keywords
+    );
 
     // 2. Featured image (best-effort — don't fail the whole write if image fails)
     let featuredUrl: string | null = null;

@@ -10,9 +10,12 @@ import {
   fetchAllTerms,
   fetchAllPosts,
   fetchSyncPayload,
+  fetchPages,
+  fetchProductTerms,
   type WpAuth,
   type WpTerm,
   type WpPostSummary,
+  type LinkTarget,
 } from "../lib/wordpress";
 import { makeCompanionRunner, type CompanionRunner } from "../lib/companion";
 
@@ -85,9 +88,12 @@ async function syncProject(
   let tags: WpTerm[];
   let posts: WpPostSummary[];
   let yoast: boolean;
+  let pages: LinkTarget[];
+  let productCategories: LinkTarget[];
+  let productTags: LinkTarget[];
   const payload = await fetchSyncPayload(auth, runner);
   if (payload) {
-    ({ categories, tags, posts, yoast } = payload);
+    ({ categories, tags, posts, yoast, pages, productCategories, productTags } = payload);
   } else {
     [categories, tags] = await Promise.all([
       fetchAllTerms(auth, "categories", runner),
@@ -95,6 +101,11 @@ async function syncProject(
     ]);
     posts = await fetchAllPosts(auth, runner);
     yoast = await detectYoast(auth.siteUrl, runner);
+    [pages, productCategories, productTags] = await Promise.all([
+      fetchPages(auth, runner),
+      fetchProductTerms(auth, "product_cat", runner),
+      fetchProductTerms(auth, "product_tag", runner),
+    ]);
   }
 
   const termRows = [
@@ -144,6 +155,19 @@ async function syncProject(
   if (postRows.length) {
     // content_html intentionally omitted → preserved on re-sync, default on insert.
     await sb.from("posts").upsert(postRows, { onConflict: "project_id,wp_post_id" });
+  }
+
+  // 3. Internal-link targets (posts, pages, product categories/tags).
+  const linkRows = [
+    ...posts.map((p) => ({ type: "post", id: p.id, title: decodeEntities(p.title), url: p.link })),
+    ...pages.map((t) => ({ type: "page", id: t.id, title: decodeEntities(t.title), url: t.url })),
+    ...productCategories.map((t) => ({ type: "product_cat", id: t.id, title: decodeEntities(t.title), url: t.url })),
+    ...productTags.map((t) => ({ type: "product_tag", id: t.id, title: decodeEntities(t.title), url: t.url })),
+  ]
+    .filter((t) => t.url && t.title)
+    .map((t) => ({ project_id: projectId, wp_id: t.id, type: t.type, title: t.title, url: t.url }));
+  if (linkRows.length) {
+    await sb.from("link_targets").upsert(linkRows, { onConflict: "project_id,type,wp_id" });
   }
 
   await sb

@@ -372,11 +372,65 @@ export async function uploadMedia(
   return { id: json.id, url: json.source_url };
 }
 
+export interface LinkTarget {
+  id: number;
+  title: string;
+  url: string;
+}
+
 export interface SyncPayload {
   posts: WpPostSummary[];
   categories: WpTerm[];
   tags: WpTerm[];
   yoast: boolean;
+  pages: LinkTarget[];
+  productCategories: LinkTarget[];
+  productTags: LinkTarget[];
+}
+
+/** Fetches published pages as link targets (paginated). */
+export async function fetchPages(auth: WpAuth, runner?: CompanionRunner): Promise<LinkTarget[]> {
+  const out: LinkTarget[] = [];
+  let page = 1;
+  for (;;) {
+    const r = await wpFetch(auth.siteUrl, auth, "/wp/v2/pages", {}, {
+      per_page: 100,
+      page,
+      status: "publish",
+      _fields: "id,title,link",
+    }, runner);
+    if (r.status >= 400) break;
+    const batch = JSON.parse(r.text) as Array<{ id: number; title: { rendered: string }; link: string }>;
+    for (const p of batch) out.push({ id: p.id, title: p.title?.rendered ?? "", url: p.link });
+    const totalPages = Number(r.headers.get("X-WP-TotalPages") ?? "1");
+    if (page >= totalPages || batch.length === 0) break;
+    page++;
+  }
+  return out;
+}
+
+/** Fetches WooCommerce product terms (product_cat / product_tag) as link targets. */
+export async function fetchProductTerms(
+  auth: WpAuth,
+  taxonomy: "product_cat" | "product_tag",
+  runner?: CompanionRunner
+): Promise<LinkTarget[]> {
+  const out: LinkTarget[] = [];
+  let page = 1;
+  for (;;) {
+    const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/${taxonomy}`, {}, {
+      per_page: 100,
+      page,
+      _fields: "id,name,link",
+    }, runner);
+    if (r.status >= 400) break; // taxonomy may not exist (no WooCommerce)
+    const batch = JSON.parse(r.text) as Array<{ id: number; name: string; link: string }>;
+    for (const t of batch) out.push({ id: t.id, title: t.name, url: t.link });
+    const totalPages = Number(r.headers.get("X-WP-TotalPages") ?? "1");
+    if (page >= totalPages || batch.length === 0) break;
+    page++;
+  }
+  return out;
 }
 
 /**
@@ -392,12 +446,26 @@ export async function fetchSyncPayload(
   const r = await wpFetch(auth.siteUrl, auth, "/seodash/v1/sync", {}, {}, runner);
   if (r.status === 404) return null;
   if (r.status >= 400) throw new Error(`sync route HTTP ${r.status}`);
-  const d = JSON.parse(r.text) as Partial<SyncPayload>;
+  const d = JSON.parse(r.text) as {
+    posts?: WpPostSummary[];
+    categories?: WpTerm[];
+    tags?: WpTerm[];
+    yoast?: boolean;
+    pages?: Array<{ id: number; title: string; link: string }>;
+    product_categories?: Array<{ id: number; name: string; link: string }>;
+    product_tags?: Array<{ id: number; name: string; link: string }>;
+  };
+  const mapTargets = (
+    arr: Array<{ id: number; title?: string; name?: string; link: string }> | undefined
+  ): LinkTarget[] => (arr ?? []).map((t) => ({ id: t.id, title: t.title ?? t.name ?? "", url: t.link }));
   return {
     posts: d.posts ?? [],
     categories: d.categories ?? [],
     tags: d.tags ?? [],
     yoast: Boolean(d.yoast),
+    pages: mapTargets(d.pages),
+    productCategories: mapTargets(d.product_categories),
+    productTags: mapTargets(d.product_tags),
   };
 }
 

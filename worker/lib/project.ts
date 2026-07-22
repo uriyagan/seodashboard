@@ -11,6 +11,7 @@ export interface ProjectRow {
   wp_app_password_encrypted: string | null;
   content_prompt: string;
   image_prompt: string;
+  keywords: string[];
   cadence_per_week: number;
   stuck_draft_days: number;
   last_post_at: string | null;
@@ -24,7 +25,7 @@ export async function loadProject(
   const { data, error } = await sb
     .from("projects")
     .select(
-      "id, name, site_url, wp_username, wp_app_password_encrypted, content_prompt, image_prompt, cadence_per_week, stuck_draft_days, last_post_at"
+      "id, name, site_url, wp_username, wp_app_password_encrypted, content_prompt, image_prompt, keywords, cadence_per_week, stuck_draft_days, last_post_at"
     )
     .eq("id", projectId)
     .single();

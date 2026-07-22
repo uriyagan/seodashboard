@@ -55,17 +55,23 @@ async function callGemini(env: Env, model: string, body: unknown): Promise<any> 
 export async function generateArticle(
   env: Env,
   systemPrompt: string,
-  topic: string
+  topic: string,
+  keywords: string[] = []
 ): Promise<GeneratedArticle> {
+  const keywordLine =
+    keywords.length > 0
+      ? `מילות המפתח (ביטויי חיפוש) של העסק: ${keywords.join(", ")}. בחר את המתאימה ביותר לנושא הפוסט כ-focus_keyword (או נסח מתאימה אם אף אחת אינה מדויקת), ובנה את הפוסט סביבה.`
+      : "";
   const prompt = [
     systemPrompt?.trim() || "כתוב מאמר בלוג איכותי, מקצועי ומותאם SEO בעברית.",
     "",
     `נושא הפוסט: ${topic}`,
+    keywordLine,
     "",
     "החזר JSON עם השדות: title (כותרת), content_html (גוף הפוסט כ-HTML נקי עם <h2>/<h3>/<p>/<ul>),",
     "focus_keyword (מילת מפתח ראשית), seo_title (כותרת SEO עד ~60 תווים), meta_description (תיאור מטא עד ~155 תווים).",
     "כל הטקסט בעברית.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   const data = await callGemini(env, textModel(env), {
     contents: [{ parts: [{ text: prompt }] }],
@@ -123,20 +129,38 @@ export interface GeneratedImage {
  * `basePrompt` is the project's editable image_prompt; `specific` is the
  * per-post instruction. Returns raw base64 image data.
  */
+export interface RefImage {
+  base64: string;
+  mimeType: string;
+}
+
 export async function generateImage(
   env: Env,
   basePrompt: string,
-  specific: string
+  specific: string,
+  refs: RefImage[] = []
 ): Promise<GeneratedImage> {
-  const prompt = [basePrompt?.trim(), specific?.trim()].filter(Boolean).join("\n\n");
+  const hasRefs = refs.length > 0;
+  const prompt = [
+    basePrompt?.trim(),
+    specific?.trim(),
+    hasRefs ? "שלב את המוצר מהתמונה/ות המצורפות בתמונה שתיווצר, בצורה טבעית ומשולבת." : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const parts: Array<Record<string, unknown>> = [{ text: prompt }];
+  for (const r of refs) {
+    parts.push({ inlineData: { mimeType: r.mimeType || "image/png", data: r.base64 } });
+  }
 
   const data = await callGemini(env, imageModel(env), {
-    contents: [{ parts: [{ text: prompt }] }],
+    contents: [{ parts }],
     generationConfig: { responseModalities: ["IMAGE"] },
   });
 
-  const parts = data?.candidates?.[0]?.content?.parts ?? [];
-  for (const part of parts) {
+  const respParts = data?.candidates?.[0]?.content?.parts ?? [];
+  for (const part of respParts) {
     if (part.inlineData?.data) {
       return {
         base64: part.inlineData.data,
