@@ -13,6 +13,39 @@ import { loadProducts, eligibleCategories, topProductsForCategory } from "../lib
 
 export const ai = new Hono<{ Bindings: Env }>();
 
+/** Fetches a remote image and returns it as an inline base64 reference. */
+async function urlToRef(url: string): Promise<{ base64: string; mimeType: string } | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const mimeType = res.headers.get("content-type") || "image/jpeg";
+    const buf = new Uint8Array(await res.arrayBuffer());
+    let bin = "";
+    for (const b of buf) bin += String.fromCharCode(b);
+    return { base64: btoa(bin), mimeType };
+  } catch {
+    return null;
+  }
+}
+
+/** In-stock products (name + image) for a category, to pick from when
+ *  generating a featured image (spec §5.3). No category → all in-stock. */
+ai.get("/api/projects/:id/category-products", async (c) => {
+  const sb = await requireAdmin(c.env, c.req.raw);
+  if (!sb) return c.json({ error: "unauthorized" }, 401);
+  const projectId = c.req.param("id");
+  const categoryId = Number(c.req.query("categoryId")) || null;
+
+  const products = await loadProducts(sb, projectId);
+  const list = products
+    .filter((p) => p.stock_status === "instock" && p.image_url)
+    .filter((p) => !categoryId || p.category_ids.includes(categoryId))
+    .sort((a, b) => b.total_sales - a.total_sales)
+    .slice(0, 60)
+    .map((p) => ({ wp_id: p.wp_id, name: p.name, image_url: p.image_url }));
+  return c.json({ ok: true, products: list });
+});
+
 /**
  * Generate a full article with Gemini. When no idea/category was supplied,
  * the post's title is first matched to the most relevant product category and
@@ -121,15 +154,22 @@ ai.post("/api/projects/:id/ai/image", async (c) => {
   const project = await loadProject(sb, projectId);
   if (!project) return c.json({ error: "project not found" }, 404);
 
-  const { specific, role, upload, refImages } = await c.req.json<{
+  const { specific, role, upload, refImages, refImageUrls } = await c.req.json<{
     specific: string;
     role?: "featured" | "body";
     upload?: boolean;
     refImages?: { base64: string; mimeType: string }[];
+    refImageUrls?: string[];
   }>();
 
   try {
-    const img = await generateImage(c.env, project.image_prompt, specific ?? "", refImages ?? []);
+    // Reference images: uploaded (base64) + picked product images (by URL).
+    const refs = [...(refImages ?? [])];
+    if (refImageUrls?.length) {
+      const fetched = await Promise.all(refImageUrls.slice(0, 3).map((u) => urlToRef(u)));
+      for (const f of fetched) if (f) refs.push(f);
+    }
+    const img = await generateImage(c.env, project.image_prompt, specific ?? "", refs);
 
     // Optionally upload to WordPress media (needed for a usable URL on the site).
     if (upload !== false) {

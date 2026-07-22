@@ -7,13 +7,14 @@ export interface ProductRow {
   total_sales: number;
   date_created: string | null;
   category_ids: number[];
+  image_url: string | null;
 }
 
 /** Loads all synced products for a project (RLS-scoped). */
 export async function loadProducts(sb: SupabaseClient, projectId: string): Promise<ProductRow[]> {
   const { data } = await sb
     .from("products")
-    .select("wp_id, name, stock_status, total_sales, date_created, category_ids")
+    .select("wp_id, name, stock_status, total_sales, date_created, category_ids, image_url")
     .eq("project_id", projectId);
   return (data ?? []) as ProductRow[];
 }

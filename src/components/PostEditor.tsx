@@ -31,6 +31,114 @@ function slugify(s: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+interface PickedProduct {
+  wp_id: number;
+  name: string;
+  image_url: string;
+}
+
+/** Modal grid to pick up to 3 category products for image generation (spec §5.3). */
+function ProductPicker({
+  projectId,
+  categoryId,
+  selected,
+  onClose,
+  onConfirm,
+}: {
+  projectId: string;
+  categoryId: number | null;
+  selected: PickedProduct[];
+  onClose: () => void;
+  onConfirm: (products: PickedProduct[]) => void;
+}) {
+  const [products, setProducts] = useState<PickedProduct[] | null>(null);
+  const [picked, setPicked] = useState<PickedProduct[]>(selected);
+
+  useEffect(() => {
+    const q = categoryId ? `?categoryId=${categoryId}` : "";
+    api<{ products: PickedProduct[] }>(
+      `/api/projects/${projectId}/category-products${q}`,
+      undefined,
+      "GET"
+    )
+      .then((r) => setProducts(r.products))
+      .catch(() => setProducts([]));
+  }, [projectId, categoryId]);
+
+  function toggle(p: PickedProduct) {
+    setPicked((prev) =>
+      prev.some((x) => x.wp_id === p.wp_id)
+        ? prev.filter((x) => x.wp_id !== p.wp_id)
+        : prev.length >= 3
+          ? prev
+          : [...prev, p]
+    );
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+          <h2 className="text-lg font-bold text-[var(--text)]">בחירת מוצרים לשילוב בתמונה</h2>
+          <button
+            onClick={onClose}
+            className="flex size-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            aria-label="סגירה"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <p className="mb-3 text-sm text-[var(--muted)]">בחר עד 3 מוצרים ({picked.length}/3).</p>
+          {!products && (
+            <div className="flex justify-center py-10">
+              <Spinner className="size-6" />
+            </div>
+          )}
+          {products && products.length === 0 && (
+            <p className="py-8 text-center text-sm text-[var(--muted)]">
+              אין מוצרים במלאי לקטגוריה זו. ודא שהאתר מסונכרן.
+            </p>
+          )}
+          {products && products.length > 0 && (
+            <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+              {products.map((p) => {
+                const on = picked.some((x) => x.wp_id === p.wp_id);
+                return (
+                  <button
+                    key={p.wp_id}
+                    onClick={() => toggle(p)}
+                    className={`group flex flex-col overflow-hidden rounded-lg border-2 text-right transition-colors ${
+                      on ? "border-[var(--brand)]" : "border-[var(--border)] hover:border-[var(--muted)]"
+                    }`}
+                  >
+                    <img src={p.image_url} alt={p.name} className="aspect-square w-full object-cover" />
+                    <span className="line-clamp-2 p-1.5 text-xs text-[var(--text)]">{p.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-5 py-4">
+          <Button variant="ghost" onClick={onClose}>ביטול</Button>
+          <Button onClick={() => onConfirm(picked)}>
+            אישור ({picked.length})
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface EditorState {
   id: string | null;
   wp_post_id: number | null;
@@ -95,6 +203,8 @@ export function PostEditor({
     preview: string;
   } | null>(null);
   const [lightbox, setLightbox] = useState(false);
+  const [pickedProducts, setPickedProducts] = useState<PickedProduct[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   function removeFeatured() {
     setState((s) => ({ ...s, featured_image_url: "", featured_media: null }));
@@ -357,6 +467,7 @@ export function PostEditor({
           role: "featured",
           upload: true,
           refImages: productRef ? [{ base64: productRef.base64, mimeType: productRef.mimeType }] : [],
+          refImageUrls: pickedProducts.map((p) => p.image_url).filter(Boolean),
         }
       );
       if (!r.ok || !r.url) throw new Error(r.error || "יצירת התמונה נכשלה");
@@ -521,6 +632,39 @@ export function PostEditor({
                     onChange={onAttachProduct}
                   />
                 </div>
+
+                {/* Pick products from the store's catalog (§5.3) */}
+                <button
+                  onClick={() => setPickerOpen(true)}
+                  className="w-full rounded-lg border border-[var(--border)] p-2 text-xs text-[var(--brand)] transition-colors hover:bg-[var(--surface-2)]"
+                >
+                  {pickedProducts.length
+                    ? `נבחרו ${pickedProducts.length} מוצרים מהחנות`
+                    : "בחר מוצרים מהחנות לשילוב בתמונה"}
+                </button>
+                {pickedProducts.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {pickedProducts.map((p) => (
+                      <div key={p.wp_id} className="relative">
+                        <img
+                          src={p.image_url}
+                          alt={p.name}
+                          className="size-10 rounded-md border border-[var(--border)] object-cover"
+                        />
+                        <button
+                          onClick={() =>
+                            setPickedProducts((prev) => prev.filter((x) => x.wp_id !== p.wp_id))
+                          }
+                          className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-black/70 text-white"
+                          aria-label="הסרה"
+                        >
+                          <X className="size-2.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <Button variant="outline" onClick={onGenImage} loading={busy === "image"} className="w-full">
                   <Sparkles className="size-4" />
                   צור תמונה (Nano Banana 2)
@@ -617,6 +761,20 @@ export function PostEditor({
           </div>
         </div>
       </div>
+
+      {/* Product picker for image generation */}
+      {pickerOpen && (
+        <ProductPicker
+          projectId={activeProject.id}
+          categoryId={state.product_category_id}
+          selected={pickedProducts}
+          onClose={() => setPickerOpen(false)}
+          onConfirm={(products) => {
+            setPickedProducts(products);
+            setPickerOpen(false);
+          }}
+        />
+      )}
 
       {/* Featured-image lightbox */}
       {lightbox && state.featured_image_url && (
