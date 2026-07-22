@@ -13,6 +13,7 @@ import { useProjects } from "@/lib/projects";
 import { Alert, Button, Card, Input, Label, Spinner } from "@/components/ui";
 import { TermSelect, type Term } from "@/components/TermSelect";
 import { RichEditor } from "@/components/RichEditor";
+import { YoastAnalysis } from "@/components/YoastAnalysis";
 
 interface EditorState {
   id: string | null;
@@ -362,6 +363,19 @@ export function PostEditor({
                 />
                 <p className="mt-1 text-xs text-[var(--muted)]">{state.meta_description.length} תווים</p>
               </div>
+            </Card>
+
+            {/* Live Yoast analysis */}
+            <Card className="p-4">
+              <YoastAnalysis
+                input={{
+                  content: state.content_html,
+                  keyword: state.focus_keyword,
+                  title: state.seo_title || state.title,
+                  description: state.meta_description,
+                  slug: "",
+                }}
+              />
             </Card>
           </div>
         </div>
