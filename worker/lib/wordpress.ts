@@ -1,6 +1,14 @@
 /**
- * Minimal WordPress REST API client (runs in the Worker).
+ * WordPress REST API client (runs in the Worker).
  * Auth via Application Passwords (HTTP Basic).
+ *
+ * WAF resilience (learned from the WooDonkey project): some hosts (e.g. SiteGround)
+ * challenge datacenter requests to the literal `/wp-json/` path with an HTML
+ * anti-bot page (sgcaptcha) — even a 200 carrying HTML, which makes `res.json()`
+ * throw the cryptic "Unexpected token '<'". To get around it every request tries
+ * TWO URL forms: the pretty `/wp-json/...` path, then the `?rest_route=...` query
+ * form on the site root (which those WAFs typically leave open). A full browser
+ * User-Agent is also sent, since bot-like UAs get 403'd.
  */
 
 export interface WpAuth {
@@ -31,22 +39,81 @@ function authHeader(auth: WpAuth): string {
   return "Basic " + btoa(`${auth.username}:${auth.appPassword}`);
 }
 
-// Some hosts (e.g. SiteGround) block browser-like User-Agents coming from
-// datacenter IPs and return an HTML block page. A neutral custom UA passes.
-const USER_AGENT = "SEO-Dashboard/1.0 (+https://seo.uriyaganor.com)";
+// A real browser UA — hosts' anti-bot/WAF 403-challenge bot-identifying UAs.
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-/** Standard headers for WP REST calls, with UA + optional auth + extras. */
-function wpHeaders(auth?: WpAuth, extra?: Record<string, string>): Record<string, string> {
-  return {
-    "User-Agent": USER_AGENT,
-    Accept: "application/json",
-    ...(auth ? { Authorization: authHeader(auth) } : {}),
-    ...extra,
-  };
+function siteBase(siteUrl: string): string {
+  return siteUrl.replace(/\/+$/, "");
 }
 
-function apiBase(siteUrl: string): string {
-  return siteUrl.replace(/\/+$/, "") + "/wp-json/wp/v2";
+/** Builds the pretty `/wp-json` URL and the `?rest_route=` fallback URL for a route. */
+function buildUrls(
+  siteUrl: string,
+  route: string,
+  query: Record<string, string | number>
+): string[] {
+  const b = siteBase(siteUrl);
+  const pretty = new URL(`${b}/wp-json${route}`);
+  const rr = new URL(`${b}/`);
+  rr.searchParams.set("rest_route", route === "" ? "/" : route);
+  for (const [k, v] of Object.entries(query)) {
+    pretty.searchParams.set(k, String(v));
+    rr.searchParams.set(k, String(v));
+  }
+  return [pretty.toString(), rr.toString()];
+}
+
+interface WpResult {
+  status: number;
+  headers: Headers;
+  text: string;
+}
+
+/**
+ * Core request: tries the pretty path then the ?rest_route= form. A transport
+ * error or a non-JSON body (WAF HTML challenge) falls through to the next form;
+ * a JSON body — even an error status — is a real response and is returned.
+ */
+async function wpFetch(
+  siteUrl: string,
+  auth: WpAuth | undefined,
+  route: string,
+  init: RequestInit = {},
+  query: Record<string, string | number> = {}
+): Promise<WpResult> {
+  const headers: Record<string, string> = {
+    "User-Agent": BROWSER_UA,
+    Accept: "application/json",
+    ...(auth ? { Authorization: authHeader(auth) } : {}),
+    ...((init.headers as Record<string, string>) ?? {}),
+  };
+
+  let lastErr = "blocked";
+  for (const url of buildUrls(siteUrl, route, query)) {
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, headers });
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : "fetch failed";
+      continue; // transport-level block — try the next form
+    }
+    const text = await res.text();
+    const trimmed = text.trim();
+    if (trimmed === "") {
+      if (res.ok) return { status: res.status, headers: res.headers, text: "" };
+      lastErr = `HTTP ${res.status}`;
+      continue;
+    }
+    try {
+      JSON.parse(trimmed);
+    } catch {
+      lastErr = `blocked by host firewall (HTTP ${res.status})`;
+      continue; // HTML challenge — try the next form
+    }
+    return { status: res.status, headers: res.headers, text };
+  }
+  throw new Error(lastErr);
 }
 
 /** Checks that the WordPress REST API is reachable (no auth needed). */
@@ -54,10 +121,8 @@ export async function checkRestReachable(
   siteUrl: string
 ): Promise<{ ok: boolean; namespaces?: string[]; error?: string }> {
   try {
-    const url = siteUrl.replace(/\/+$/, "") + "/wp-json/";
-    const res = await fetch(url, { headers: wpHeaders() });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    const json = (await res.json()) as { namespaces?: string[] };
+    const r = await wpFetch(siteUrl, undefined, "/");
+    const json = JSON.parse(r.text) as { namespaces?: string[] };
     if (!json.namespaces?.includes("wp/v2")) {
       return { ok: false, error: "WordPress REST API (wp/v2) not found" };
     }
@@ -72,14 +137,12 @@ export async function testConnection(
   auth: WpAuth
 ): Promise<{ ok: boolean; user?: string; error?: string }> {
   try {
-    const res = await fetch(apiBase(auth.siteUrl) + "/users/me?context=edit", {
-      headers: wpHeaders(auth),
-    });
-    if (res.status === 401 || res.status === 403) {
+    const r = await wpFetch(auth.siteUrl, auth, "/wp/v2/users/me", {}, { context: "edit" });
+    if (r.status === 401 || r.status === 403) {
       return { ok: false, error: "אימות נכשל — שם משתמש או Application Password שגויים" };
     }
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    const json = (await res.json()) as { name?: string; slug?: string };
+    if (r.status >= 400) return { ok: false, error: `HTTP ${r.status}` };
+    const json = JSON.parse(r.text) as { name?: string; slug?: string };
     return { ok: true, user: json.name ?? json.slug };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "fetch failed" };
@@ -100,14 +163,15 @@ export async function fetchAllTerms(
   const out: WpTerm[] = [];
   let page = 1;
   for (;;) {
-    const res = await fetch(
-      `${apiBase(auth.siteUrl)}/${taxonomy}?per_page=100&page=${page}&_fields=id,name,slug,count`,
-      { headers: wpHeaders(auth) }
-    );
-    if (!res.ok) break;
-    const batch = (await res.json()) as WpTerm[];
+    const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/${taxonomy}`, {}, {
+      per_page: 100,
+      page,
+      _fields: "id,name,slug,count",
+    });
+    if (r.status >= 400) break;
+    const batch = JSON.parse(r.text) as WpTerm[];
     out.push(...batch);
-    const totalPages = Number(res.headers.get("X-WP-TotalPages") ?? "1");
+    const totalPages = Number(r.headers.get("X-WP-TotalPages") ?? "1");
     if (page >= totalPages || batch.length === 0) break;
     page++;
   }
@@ -129,12 +193,12 @@ export interface WpPostFull {
 
 /** Fetches a single post's full content + Yoast meta (context=edit). */
 export async function fetchPostFull(auth: WpAuth, wpId: number): Promise<WpPostFull> {
-  const res = await fetch(
-    `${apiBase(auth.siteUrl)}/posts/${wpId}?context=edit&_fields=id,title,content,status,categories,tags,featured_media,meta,yoast_head_json`,
-    { headers: wpHeaders(auth) }
-  );
-  if (!res.ok) throw new Error(`fetch post ${wpId} failed: HTTP ${res.status}`);
-  const p = (await res.json()) as {
+  const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/posts/${wpId}`, {}, {
+    context: "edit",
+    _fields: "id,title,content,status,categories,tags,featured_media,meta,yoast_head_json",
+  });
+  if (r.status >= 400) throw new Error(`fetch post ${wpId} failed: HTTP ${r.status}`);
+  const p = JSON.parse(r.text) as {
     id: number;
     title: { raw?: string; rendered: string };
     content: { raw?: string; rendered: string };
@@ -174,18 +238,14 @@ export interface PushPostInput {
 
 /** Creates or updates a post on WordPress, always as a draft. Sets Yoast meta. */
 export async function pushPost(auth: WpAuth, input: PushPostInput): Promise<number> {
-  const isUpdate = Boolean(input.wpId);
-  const url = isUpdate
-    ? `${apiBase(auth.siteUrl)}/posts/${input.wpId}`
-    : `${apiBase(auth.siteUrl)}/posts`;
-
+  const route = input.wpId ? `/wp/v2/posts/${input.wpId}` : "/wp/v2/posts";
   const body: Record<string, unknown> = {
     title: input.title,
     content: input.content_html,
     status: "draft", // always draft
     categories: input.categories,
     tags: input.tags,
-    // Requires the companion mu-plugin to expose these Yoast meta keys to REST.
+    // Requires the Yoast REST snippet on the site to persist these meta keys.
     meta: {
       _yoast_wpseo_focuskw: input.focus_keyword ?? "",
       _yoast_wpseo_title: input.seo_title ?? "",
@@ -194,17 +254,15 @@ export async function pushPost(auth: WpAuth, input: PushPostInput): Promise<numb
   };
   if (input.featured_media) body.featured_media = input.featured_media;
 
-  const res = await fetch(url, {
+  const r = await wpFetch(auth.siteUrl, auth, route, {
     method: "POST",
-    headers: wpHeaders(auth, { "Content-Type": "application/json" }),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`push post failed: HTTP ${res.status} ${detail.slice(0, 200)}`);
+  if (r.status >= 400) {
+    throw new Error(`push post failed: HTTP ${r.status} ${r.text.slice(0, 200)}`);
   }
-  const json = (await res.json()) as { id: number };
-  return json.id;
+  return (JSON.parse(r.text) as { id: number }).id;
 }
 
 /** Creates a new category or tag; returns its id + name. */
@@ -213,17 +271,15 @@ export async function createTerm(
   taxonomy: "categories" | "tags",
   name: string
 ): Promise<WpTerm> {
-  const res = await fetch(`${apiBase(auth.siteUrl)}/${taxonomy}`, {
+  const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/${taxonomy}`, {
     method: "POST",
-    headers: wpHeaders(auth, { "Content-Type": "application/json" }),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
-  if (!res.ok) {
-    // Term may already exist — surface a clean error.
-    const detail = await res.text().catch(() => "");
-    throw new Error(`create term failed: HTTP ${res.status} ${detail.slice(0, 200)}`);
+  if (r.status >= 400) {
+    throw new Error(`create term failed: HTTP ${r.status} ${r.text.slice(0, 200)}`);
   }
-  const json = (await res.json()) as { id: number; name: string; slug: string };
+  const json = JSON.parse(r.text) as { id: number; name: string; slug: string };
   return { id: json.id, name: json.name, slug: json.slug };
 }
 
@@ -234,19 +290,18 @@ export async function uploadMedia(
   filename: string,
   mimeType: string
 ): Promise<{ id: number; url: string }> {
-  const res = await fetch(`${apiBase(auth.siteUrl)}/media`, {
+  const r = await wpFetch(auth.siteUrl, auth, "/wp/v2/media", {
     method: "POST",
-    headers: wpHeaders(auth, {
+    headers: {
       "Content-Type": mimeType,
       "Content-Disposition": `attachment; filename="${filename}"`,
-    }),
+    },
     body: bytes as unknown as BodyInit,
   });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`upload media failed: HTTP ${res.status} ${detail.slice(0, 200)}`);
+  if (r.status >= 400) {
+    throw new Error(`upload media failed: HTTP ${r.status} ${r.text.slice(0, 200)}`);
   }
-  const json = (await res.json()) as { id: number; source_url: string };
+  const json = JSON.parse(r.text) as { id: number; source_url: string };
   return { id: json.id, url: json.source_url };
 }
 
@@ -255,12 +310,14 @@ export async function fetchAllPosts(auth: WpAuth): Promise<WpPostSummary[]> {
   const out: WpPostSummary[] = [];
   let page = 1;
   for (;;) {
-    const res = await fetch(
-      `${apiBase(auth.siteUrl)}/posts?per_page=100&page=${page}&status=publish,draft,pending,private,future&_fields=id,title,status,link,date,modified,categories,tags`,
-      { headers: wpHeaders(auth) }
-    );
-    if (!res.ok) break;
-    const batch = (await res.json()) as Array<{
+    const r = await wpFetch(auth.siteUrl, auth, "/wp/v2/posts", {}, {
+      per_page: 100,
+      page,
+      status: "publish,draft,pending,private,future",
+      _fields: "id,title,status,link,date,modified,categories,tags",
+    });
+    if (r.status >= 400) break;
+    const batch = JSON.parse(r.text) as Array<{
       id: number;
       title: { rendered: string };
       status: string;
@@ -282,7 +339,7 @@ export async function fetchAllPosts(auth: WpAuth): Promise<WpPostSummary[]> {
         tags: p.tags ?? [],
       });
     }
-    const totalPages = Number(res.headers.get("X-WP-TotalPages") ?? "1");
+    const totalPages = Number(r.headers.get("X-WP-TotalPages") ?? "1");
     if (page >= totalPages || batch.length === 0) break;
     page++;
   }
