@@ -22,11 +22,16 @@ function Section({ title, score, rating, checks }: { title: string; score: numbe
           {RATING_HE[rating]} · {Math.round(score)}/100
         </span>
       </div>
-      <ul className="space-y-1">
+      <ul className="space-y-2">
         {sorted.map((c) => (
-          <li key={c.id} className="flex items-start gap-2 text-sm text-[var(--text)]">
+          <li key={c.id} className="flex items-start gap-2 text-sm">
             <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", DOT[c.rating])} />
-            <span>{c.label}</span>
+            <div className="min-w-0">
+              <span className="text-[var(--text)]">{c.label}</span>
+              {c.rating !== "good" && c.tip && (
+                <p className="mt-0.5 text-xs leading-relaxed text-[var(--muted)]">{c.tip}</p>
+              )}
+            </div>
           </li>
         ))}
       </ul>

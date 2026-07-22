@@ -9,6 +9,7 @@ export interface Check {
   id: string;
   rating: Rating;
   label: string;
+  tip: string;
 }
 
 export interface Analysis {
@@ -45,7 +46,7 @@ const LABELS: Record<string, string> = {
   functionWordsInKeyphrase: "מילות פונקציה במילת המפתח",
   singleH1: "כותרת H1 יחידה",
   // Readability
-  subheadingsTooLongText: "פיזור כותרות משנה",
+  subheadingsTooLong: "פיזור כותרות משנה",
   textParagraphTooLong: "אורך פסקאות",
   textSentenceLength: "אורך משפטים",
   textTransitionWords: "מילות מעבר",
@@ -54,6 +55,39 @@ const LABELS: Record<string, string> = {
   textPresence: "קיים תוכן לניתוח",
   wordComplexity: "מורכבות מילים",
   listPresence: "שימוש ברשימות",
+};
+
+// Actionable "what to do" guidance in Hebrew, per assessment (shown when a
+// check needs improvement).
+const TIPS: Record<string, string> = {
+  // SEO
+  introductionKeyword: "כלול את מילת המפתח בפסקה הראשונה של הפוסט.",
+  keyphraseLength: "כוון למילת מפתח באורך של 1–4 מילות תוכן.",
+  keyphraseDensity: "אם היא חוזרת יותר מדי — הפחת חזרות; אם פחות מדי — הוסף. יעד: כ-0.5%–3%.",
+  metaDescriptionKeyword: "שלב את מילת המפתח בתיאור המטא.",
+  metaDescriptionLength: "אורך אידיאלי 120–156 תווים. קצר אם ארוך, הארך אם קצר.",
+  subheadingsKeyword: "כלול את מילת המפתח באחת מכותרות המשנה (H2/H3).",
+  textCompetingLinks: "יש קישורים עם עוגן זהה למילת המפתח שמתחרים בפוסט — שנה אותם.",
+  imageKeyphrase: "הוסף מילת מפתח לטקסט ה-alt של לפחות תמונה אחת.",
+  images: "הוסף לפחות תמונה אחת לגוף הפוסט.",
+  textLength: "הארך את הפוסט — לפחות 300 מילים, מומלץ 900+.",
+  externalLinks: "הוסף לפחות קישור חיצוני אחד למקור רלוונטי.",
+  keyphraseInSEOTitle: "כלול את מילת המפתח בכותרת ה-SEO, רצוי בתחילתה.",
+  internalLinks: "הוסף לפחות קישור פנימי אחד לעמוד או פוסט אחר באתר.",
+  titleWidth: "אורך אידיאלי 50–60 תווים. קצר אם ארוכה מדי, הארך אם קצרה — כדי שלא תיחתך בגוגל.",
+  slugKeyword: "כלול את מילת המפתח בכתובת ה-URL (Slug).",
+  functionWordsInKeyphrase: "הוסף למילת המפתח מילים משמעותיות (לא רק מילות קישור).",
+  singleH1: "ודא שיש כותרת H1 אחת בלבד (הכותרת הראשית).",
+  // Readability
+  subheadingsTooLong: "יש קטע ארוך ללא כותרת משנה — הוסף כותרת שתפרק אותו.",
+  textParagraphTooLong: "יש פסקאות ארוכות מדי — פצל אותן לפסקאות קצרות יותר.",
+  textSentenceLength: "יש יותר מדי משפטים ארוכים — קצר או פצל משפטים מעל 20 מילים.",
+  textTransitionWords: "הוסף מילות מעבר (לכן, בנוסף, לעומת זאת) לשיפור הזרימה.",
+  passiveVoice: "יש שימוש רב בקול סביל — נסח משפטים בקול פעיל.",
+  sentenceBeginnings: "כמה משפטים רצופים מתחילים באותה מילה — גוון את הפתיחות.",
+  textPresence: "אין מספיק טקסט לניתוח — הוסף תוכן.",
+  wordComplexity: "יש הרבה מילים מורכבות — פשט את השפה.",
+  listPresence: "שקול להוסיף רשימה (בּוליטים/מספור) לשיפור הקריאוּת.",
 };
 
 interface YoastResult {
@@ -122,6 +156,8 @@ export async function analyzeYoast(input: AnalysisInput): Promise<Analysis> {
       id: r._identifier,
       rating: toRating(scoreToRating, r.score),
       label: LABELS[r._identifier] ?? strip(r.text) ?? r._identifier,
+      // Hebrew guidance; fall back to Yoast's own (English) feedback text.
+      tip: TIPS[r._identifier] ?? strip(r.text),
     }));
 
   const seoA = new SeoAssessor(researcher);
