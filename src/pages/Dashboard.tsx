@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import {
   FileText,
@@ -39,6 +40,19 @@ const NAV: { key: NavKey; label: string; icon: typeof LayoutDashboard }[] = [
   { key: "ideas", label: "רעיונות", icon: Lightbulb },
   { key: "settings", label: "הגדרות", icon: Settings },
 ];
+
+const NAV_PATH: Record<NavKey, string> = {
+  overview: "/",
+  posts: "/posts",
+  ideas: "/ideas",
+  settings: "/settings",
+};
+function pathToNav(pathname: string): NavKey {
+  if (pathname.startsWith("/posts")) return "posts";
+  if (pathname.startsWith("/ideas")) return "ideas";
+  if (pathname.startsWith("/settings")) return "settings";
+  return "overview";
+}
 
 /** Right sidebar: logo, nav, and (bottom) project switcher + theme + logout.
  *  Static on lg+; a slide-in drawer (with backdrop) on smaller screens. */
@@ -241,13 +255,33 @@ function Overview() {
   );
 }
 
+/** Post editor route — reads the :id param ("new" or absent → a new post). */
+function EditorRoute() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const postId = !id || id === "new" ? null : id;
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-full items-center justify-center">
+          <Spinner className="size-7" />
+        </div>
+      }
+    >
+      <PostEditor postId={postId} onBack={() => navigate("/posts")} />
+    </Suspense>
+  );
+}
+
 function DashboardInner() {
   const { projects, loading } = useProjects();
-  const [nav, setNavState] = useState<NavKey>("overview");
+  const navigate = useNavigate();
+  const location = useLocation();
   const [addOpen, setAddOpen] = useState(false);
-  const [editing, setEditing] = useState<{ postId: string | null } | null>(null);
-  const [listKey, setListKey] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const nav = pathToNav(location.pathname);
+  const isEditor = /^\/posts\/.+/.test(location.pathname);
 
   // Complete the Google Search Console OAuth round-trip: the worker callback
   // bounces back to "/?gsc_code=…&gsc_state=…"; exchange it, then open Settings.
@@ -262,56 +296,22 @@ function DashboardInner() {
       return;
     }
     api("/api/gsc/exchange", { code, state: params.get("gsc_state") })
-      .then(() => setNavState("settings"))
+      .then(() => navigate("/settings"))
       .catch((e) => alert(`חיבור Google Search Console נכשל: ${e.message}`));
-  }, []);
+  }, [navigate]);
 
-  function setNav(k: NavKey) {
-    setEditing(null);
-    setNavState(k);
+  function go(k: NavKey) {
+    navigate(NAV_PATH[k]);
     setSidebarOpen(false);
   }
-  function openEditor(postId: string | null) {
-    setEditing({ postId });
-  }
-  function closeEditor() {
-    setEditing(null);
-    setListKey((k) => k + 1);
-  }
 
-  function renderContent() {
-    if (editing !== null) {
-      return (
-        <Suspense
-          fallback={
-            <div className="flex h-full items-center justify-center">
-              <Spinner className="size-7" />
-            </div>
-          }
-        >
-          <PostEditor postId={editing.postId} onBack={closeEditor} />
-        </Suspense>
-      );
-    }
-    switch (nav) {
-      case "overview":
-        return <Overview />;
-      case "posts":
-        return <PostsList key={listKey} onNew={() => openEditor(null)} onEdit={openEditor} />;
-      case "ideas":
-        return <IdeasList key={listKey} onEditPost={openEditor} />;
-      case "settings":
-        return <ProjectSettings />;
-    }
-  }
-
-  const showTopbar = editing === null && projects.length > 0;
+  const showTopbar = !isEditor && projects.length > 0;
 
   return (
     <div className="flex h-full">
       <Sidebar
         active={nav}
-        onNavigate={setNav}
+        onNavigate={go}
         onAdd={() => setAddOpen(true)}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -327,7 +327,26 @@ function DashboardInner() {
           ) : projects.length === 0 ? (
             <EmptyState onAdd={() => setAddOpen(true)} />
           ) : (
-            renderContent()
+            <Routes>
+              <Route index element={<Overview />} />
+              <Route
+                path="posts"
+                element={
+                  <PostsList
+                    onNew={() => navigate("/posts/new")}
+                    onEdit={(pid) => navigate(`/posts/${pid}`)}
+                  />
+                }
+              />
+              <Route path="posts/new" element={<EditorRoute />} />
+              <Route path="posts/:id" element={<EditorRoute />} />
+              <Route
+                path="ideas"
+                element={<IdeasList onEditPost={(pid) => navigate(`/posts/${pid}`)} />}
+              />
+              <Route path="settings" element={<ProjectSettings />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
           )}
         </main>
       </div>
