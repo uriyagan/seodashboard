@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Eye, FileText, Image as ImageIcon, Plus, RefreshCw } from "lucide-react";
+import { Eye, FileText, Image as ImageIcon, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
@@ -17,6 +17,7 @@ interface PostRow {
   wp_status: string;
   link: string | null;
   featured_thumb_url: string | null;
+  featured_image_url: string | null;
   categories: Term[];
   tags: Term[];
   published_at: string | null;
@@ -80,16 +81,28 @@ export function PostsList({
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function remove(p: PostRow) {
+    if (!confirm(`למחוק את הפוסט "${p.title || "(ללא כותרת)"}" מהמערכת? הפעולה אינה מוחקת אותו מ-WordPress.`))
+      return;
+    setDeletingId(p.id);
+    setError(null);
+    const { error } = await supabase.from("posts").delete().eq("id", p.id);
+    if (error) setError(error.message);
+    else setPosts((prev) => prev.filter((x) => x.id !== p.id));
+    setDeletingId(null);
+  }
 
   const load = useCallback(async () => {
     if (!activeProject) return;
     setLoading(true);
     const { data, error } = await supabase
       .from("posts")
-      .select("id, wp_post_id, title, wp_status, link, featured_thumb_url, categories, tags, published_at, pushed_at, updated_at")
+      .select("id, wp_post_id, title, wp_status, link, featured_thumb_url, featured_image_url, categories, tags, published_at, pushed_at, updated_at")
       .eq("project_id", activeProject.id)
-      .order("published_at", { ascending: false, nullsFirst: false })
-      .order("updated_at", { ascending: false });
+      // Newest first, so freshly created posts appear at the top.
+      .order("created_at", { ascending: false });
     if (error) setError(error.message);
     else setPosts((data ?? []) as PostRow[]);
     setLoading(false);
@@ -170,9 +183,9 @@ export function PostsList({
                     className="cursor-pointer border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--surface-2)]"
                   >
                     <td className="px-4 py-3">
-                      {p.featured_thumb_url ? (
+                      {p.featured_thumb_url || p.featured_image_url ? (
                         <img
-                          src={p.featured_thumb_url}
+                          src={p.featured_thumb_url ?? p.featured_image_url ?? ""}
                           alt=""
                           className="size-16 rounded-lg border border-[var(--border)] object-cover sm:size-[100px]"
                         />
@@ -198,19 +211,33 @@ export function PostsList({
                       {(p.published_at ?? p.pushed_at)?.slice(0, 10) ?? "—"}
                     </td>
                     <td className="px-4 py-3">
-                      {p.link && (
-                        <a
-                          href={p.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="flex size-8 items-center justify-center rounded-lg text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
-                          title="צפייה בפוסט באתר"
-                          aria-label="צפייה בפוסט באתר"
+                      <div className="flex items-center gap-1">
+                        {p.link && (
+                          <a
+                            href={p.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex size-8 items-center justify-center rounded-lg text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
+                            title="צפייה בפוסט באתר"
+                            aria-label="צפייה בפוסט באתר"
+                          >
+                            <Eye className="size-4" />
+                          </a>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void remove(p);
+                          }}
+                          disabled={deletingId === p.id}
+                          className="flex size-8 items-center justify-center rounded-lg text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--color-danger)] disabled:opacity-50"
+                          title="מחיקת פוסט"
+                          aria-label="מחיקת פוסט"
                         >
-                          <Eye className="size-4" />
-                        </a>
-                      )}
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

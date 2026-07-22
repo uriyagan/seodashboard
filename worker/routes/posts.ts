@@ -73,7 +73,7 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
       meta_description: body.meta_description,
     }, runner);
 
-    const row = {
+    const row: Record<string, unknown> = {
       project_id: projectId,
       wp_post_id: wpId,
       title: body.title,
@@ -89,7 +89,15 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
       published_at: status === "publish" ? new Date().toISOString() : null,
       pushed_at: new Date().toISOString(),
     };
-    await sb.from("posts").upsert(row, { onConflict: "project_id,wp_post_id" });
+    // Update the existing local row (by primary key) when the editor already
+    // saved one — otherwise a second row would be created (the duplicate bug).
+    // Fall back to conflict-on-wp_post_id for rows that arrived via sync.
+    if (body.postId) {
+      row.id = body.postId;
+      await sb.from("posts").upsert(row);
+    } else {
+      await sb.from("posts").upsert(row, { onConflict: "project_id,wp_post_id" });
+    }
     await sb.from("projects").update({ last_post_at: new Date().toISOString() }).eq("id", projectId);
 
     return c.json({ ok: true, wpId, status });
