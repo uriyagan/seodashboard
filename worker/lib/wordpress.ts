@@ -350,6 +350,35 @@ export async function uploadMedia(
   return { id: json.id, url: json.source_url };
 }
 
+export interface SyncPayload {
+  posts: WpPostSummary[];
+  categories: WpTerm[];
+  tags: WpTerm[];
+  yoast: boolean;
+}
+
+/**
+ * One-call sync via the companion route `/seodash/v1/sync` (returns all posts +
+ * taxonomies + Yoast presence in a single request). This is a single companion
+ * job for firewalled sites (fast), and a single direct call for reachable ones.
+ * Returns null if the route is missing (404) so callers can fall back.
+ */
+export async function fetchSyncPayload(
+  auth: WpAuth,
+  runner?: CompanionRunner
+): Promise<SyncPayload | null> {
+  const r = await wpFetch(auth.siteUrl, auth, "/seodash/v1/sync", {}, {}, runner);
+  if (r.status === 404) return null;
+  if (r.status >= 400) throw new Error(`sync route HTTP ${r.status}`);
+  const d = JSON.parse(r.text) as Partial<SyncPayload>;
+  return {
+    posts: d.posts ?? [],
+    categories: d.categories ?? [],
+    tags: d.tags ?? [],
+    yoast: Boolean(d.yoast),
+  };
+}
+
 /** Fetches all posts (metadata + titles), paginated. Content is fetched lazily elsewhere. */
 export async function fetchAllPosts(
   auth: WpAuth,

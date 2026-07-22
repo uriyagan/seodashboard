@@ -12,9 +12,25 @@ export function CompanionSnippet({ token }: { token: string }) {
             'auth_callback'=>function(){return current_user_can('edit_posts');}]);
     }
 });
+add_action('rest_api_init', function(){
+    register_rest_route('seodash/v1','/sync',['methods'=>'GET',
+        'permission_callback'=>function(){return current_user_can('edit_posts');},
+        'callback'=>'seo_dash_full_sync']);
+});
+function seo_dash_full_sync(){
+    $posts=[];
+    foreach(get_posts(['post_type'=>'post','post_status'=>['publish','draft','pending','private','future'],'numberposts'=>-1]) as $p){
+        $posts[]=['id'=>$p->ID,'title'=>$p->post_title,'status'=>$p->post_status,'link'=>get_permalink($p->ID),
+            'date'=>mysql2date('c',$p->post_date_gmt),'modified'=>mysql2date('c',$p->post_modified_gmt),
+            'categories'=>wp_get_post_categories($p->ID),'tags'=>wp_get_post_tags($p->ID,['fields'=>'ids'])];
+    }
+    $cats=[]; foreach(get_terms(['taxonomy'=>'category','hide_empty'=>false]) as $t){ $cats[]=['id'=>$t->term_id,'name'=>$t->name,'slug'=>$t->slug]; }
+    $tags=[]; foreach(get_terms(['taxonomy'=>'post_tag','hide_empty'=>false]) as $t){ $tags[]=['id'=>$t->term_id,'name'=>$t->name,'slug'=>$t->slug]; }
+    return ['posts'=>$posts,'categories'=>$cats,'tags'=>$tags,'yoast'=>defined('WPSEO_VERSION')];
+}
 add_filter('cron_schedules', function($s){ $s['seo_dash_min']=['interval'=>60,'display'=>'SEO Dashboard']; return $s; });
 add_action('init', function(){ if(!wp_next_scheduled('seo_dash_poll')) wp_schedule_event(time()+10,'seo_dash_min','seo_dash_poll'); });
-add_action('init', function(){ if(time()-(int)get_transient('seo_dash_last_poll')>=15){ set_transient('seo_dash_last_poll',time(),60); seo_dash_run_jobs(); } });
+add_action('init', function(){ if(time()-(int)get_transient('seo_dash_last_poll')>=5){ set_transient('seo_dash_last_poll',time(),60); seo_dash_run_jobs(); } });
 add_action('seo_dash_poll','seo_dash_run_jobs');
 function seo_dash_post($p,$d){ return wp_remote_post('https://seo.uriyaganor.com'.$p,['headers'=>['Content-Type'=>'application/json'],'body'=>wp_json_encode($d),'timeout'=>20]); }
 function seo_dash_run_jobs(){

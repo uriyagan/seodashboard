@@ -38,7 +38,7 @@ const POLL_MS = 700;
 export function makeCompanionRunner(
   sb: SupabaseClient,
   projectId: string,
-  timeoutMs = 24_000
+  timeoutMs = 40_000
 ): CompanionRunner {
   return async (req) => {
     const { data, error } = await sb

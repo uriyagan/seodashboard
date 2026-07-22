@@ -9,7 +9,10 @@ import {
   detectYoast,
   fetchAllTerms,
   fetchAllPosts,
+  fetchSyncPayload,
   type WpAuth,
+  type WpTerm,
+  type WpPostSummary,
 } from "../lib/wordpress";
 import { makeCompanionRunner, type CompanionRunner } from "../lib/companion";
 
@@ -76,11 +79,23 @@ async function syncProject(
   auth: WpAuth,
   runner?: CompanionRunner
 ): Promise<{ posts: number; categories: number; tags: number }> {
-  // 1. Taxonomies
-  const [categories, tags] = await Promise.all([
-    fetchAllTerms(auth, "categories", runner),
-    fetchAllTerms(auth, "tags", runner),
-  ]);
+  // Prefer the single-call companion sync route (one job for firewalled sites);
+  // fall back to the standard multi-call sync for sites without the snippet.
+  let categories: WpTerm[];
+  let tags: WpTerm[];
+  let posts: WpPostSummary[];
+  let yoast: boolean;
+  const payload = await fetchSyncPayload(auth, runner);
+  if (payload) {
+    ({ categories, tags, posts, yoast } = payload);
+  } else {
+    [categories, tags] = await Promise.all([
+      fetchAllTerms(auth, "categories", runner),
+      fetchAllTerms(auth, "tags", runner),
+    ]);
+    posts = await fetchAllPosts(auth, runner);
+    yoast = await detectYoast(auth.siteUrl, runner);
+  }
 
   const termRows = [
     ...categories.map((t) => ({
@@ -108,7 +123,6 @@ async function syncProject(
   const tagName = new Map(tags.map((t) => [t.id, decodeEntities(t.name)]));
 
   // 2. Posts (metadata + titles only)
-  const posts = await fetchAllPosts(auth, runner);
   let latest: string | null = null;
   const postRows = posts.map((p) => {
     if (p.date && (!latest || p.date > latest)) latest = p.date;
@@ -132,7 +146,7 @@ async function syncProject(
 
   await sb
     .from("projects")
-    .update({ last_post_at: latest, yoast_ready: await detectYoast(auth.siteUrl, runner) })
+    .update({ last_post_at: latest, yoast_ready: yoast })
     .eq("id", projectId);
 
   return { posts: posts.length, categories: categories.length, tags: tags.length };
