@@ -1,4 +1,5 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import {
   FileText,
   Lightbulb,
@@ -136,7 +137,26 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 
 function Overview() {
   const { activeProject } = useProjects();
+  const [counts, setCounts] = useState<{ posts: number; ideas: number } | null>(null);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    setCounts(null);
+    Promise.all([
+      supabase
+        .from("posts")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", activeProject.id),
+      supabase
+        .from("ideas")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", activeProject.id)
+        .eq("status", "suggested"),
+    ]).then(([p, i]) => setCounts({ posts: p.count ?? 0, ideas: i.count ?? 0 }));
+  }, [activeProject]);
+
   if (!activeProject) return null;
+  const fmt = (n: number | undefined) => (counts ? String(n ?? 0) : "…");
   return (
     <div className="p-[60px]">
       <div className="mb-8">
@@ -153,8 +173,8 @@ function Overview() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {[
-          { label: "פוסטים", value: "—", icon: FileText },
-          { label: "רעיונות פתוחים", value: "—", icon: Lightbulb },
+          { label: "פוסטים", value: fmt(counts?.posts), icon: FileText },
+          { label: "רעיונות פתוחים", value: fmt(counts?.ideas), icon: Lightbulb },
           { label: "קצב שבועי", value: `${activeProject.cadence_per_week}/שבוע`, icon: CalendarClock },
         ].map(({ label, value, icon: Icon }) => (
           <Card key={label} className="p-5">

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { analyzeYoast, type Analysis, type Check, type Rating, type AnalysisInput } from "@/lib/yoast";
+import type { Analysis, Check, Rating, AnalysisInput } from "@/lib/yoast";
 import { cn } from "@/lib/utils";
 
 const RATING_ORDER: Record<Rating, number> = { bad: 0, ok: 1, good: 2 };
@@ -43,22 +43,33 @@ export function YoastAnalysis({ input }: { input: AnalysisInput }) {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const reqId = useRef(0);
+  const latest = useRef(0);
+
+  // Spin up the analysis worker once (keeps the heavy engine off the main thread).
+  useEffect(() => {
+    const w = new Worker(new URL("../lib/yoast.worker.ts", import.meta.url), { type: "module" });
+    w.onmessage = (e: MessageEvent<{ id: number; ok: boolean; result?: Analysis }>) => {
+      if (e.data.id < latest.current) return; // ignore stale results
+      latest.current = e.data.id;
+      if (e.data.ok && e.data.result) setAnalysis(e.data.result);
+      setBusy(false);
+    };
+    workerRef.current = w;
+    return () => w.terminate();
+  }, []);
 
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(async () => {
+    timer.current = setTimeout(() => {
       if (!input.keyword.trim() && !input.content.trim()) {
         setAnalysis(null);
         return;
       }
       setBusy(true);
-      try {
-        setAnalysis(await analyzeYoast(input));
-      } catch {
-        /* ignore */
-      } finally {
-        setBusy(false);
-      }
+      const id = ++reqId.current;
+      workerRef.current?.postMessage({ id, input });
     }, 800);
     return () => {
       if (timer.current) clearTimeout(timer.current);

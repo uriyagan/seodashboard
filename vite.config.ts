@@ -7,6 +7,8 @@ import path from "node:path";
 
 export default defineConfig({
   base: "/",
+  // The Yoast worker dynamically imports yoastseo → needs ES-format workers.
+  worker: { format: "es" },
   plugins: [
     react(),
     tailwindcss(),

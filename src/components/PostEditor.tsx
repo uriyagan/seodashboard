@@ -468,10 +468,12 @@ export function PostEditor({
               <div>
                 <Label htmlFor="fk">מילת מפתח (Focus Keyword)</Label>
                 <Input id="fk" value={state.focus_keyword} onChange={(e) => set("focus_keyword", e.target.value)} />
+                <p className="mt-1 text-xs text-[var(--muted)]">{state.focus_keyword.length} תווים</p>
               </div>
               <div>
                 <Label htmlFor="st">כותרת SEO</Label>
                 <Input id="st" value={state.seo_title} onChange={(e) => set("seo_title", e.target.value)} />
+                <p className="mt-1 text-xs text-[var(--muted)]">{state.seo_title.length} תווים · אידיאלי 50–60</p>
               </div>
               <div>
                 <Label htmlFor="md">תיאור מטא</Label>
