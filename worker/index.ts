@@ -59,7 +59,11 @@ app.all("*", async (c) => {
   const res = await c.env.ASSETS.fetch(new Request(url.toString(), { headers: c.req.raw.headers }));
   return new Response(res.body, {
     status: 200,
-    headers: { "content-type": res.headers.get("content-type") ?? "text/html; charset=utf-8" },
+    headers: {
+      "content-type": res.headers.get("content-type") ?? "text/html; charset=utf-8",
+      // Always revalidate index.html so a redeploy's new asset hashes are picked up.
+      "cache-control": "no-cache",
+    },
   });
 });
 
