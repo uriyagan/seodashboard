@@ -490,7 +490,8 @@ export interface WpProduct {
  */
 export async function fetchProducts(
   auth: WpAuth,
-  runner?: CompanionRunner
+  runner?: CompanionRunner,
+  onProgress?: (page: number, totalPages: number) => Promise<void>
 ): Promise<WpProduct[]> {
   const out: WpProduct[] = [];
   let page = 1;
@@ -503,6 +504,10 @@ export async function fetchProducts(
       order: "desc",
     }, runner);
     if (r.status >= 400) break; // no WooCommerce, or not permitted
+    if (onProgress) {
+      const total = Number(r.headers.get("X-WP-TotalPages") ?? "1");
+      await onProgress(page, total);
+    }
     let batch: Array<Record<string, unknown>>;
     try {
       batch = JSON.parse(r.text);

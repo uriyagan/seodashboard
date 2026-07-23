@@ -79,12 +79,27 @@ projects.post("/api/projects/test-connection", async (c) => {
 });
 
 /** Shared: sync all posts + taxonomies from WordPress into the local DB. */
+/** Writes live sync progress that the dashboard polls (label + optional page counts). */
+async function setProgress(
+  sb: SupabaseClient,
+  projectId: string,
+  label: string,
+  current?: number,
+  total?: number
+): Promise<void> {
+  await sb
+    .from("projects")
+    .update({ sync_progress: { label, current, total, at: new Date().toISOString() } })
+    .eq("id", projectId);
+}
+
 async function syncProject(
   sb: SupabaseClient,
   projectId: string,
   auth: WpAuth,
   runner?: CompanionRunner
 ): Promise<{ posts: number; categories: number; tags: number; products: number }> {
+  await setProgress(sb, projectId, "מתחבר לאתר…");
   // Prefer the single-call companion sync route (one job for firewalled sites);
   // fall back to the standard multi-call sync for sites without the snippet.
   let categories: WpTerm[];
@@ -110,6 +125,8 @@ async function syncProject(
       fetchProductTerms(auth, "product_tag", runner),
     ]);
   }
+
+  await setProgress(sb, projectId, "שומר תוכן, קטגוריות ותגיות…");
 
   const termRows = [
     ...categories.map((t) => ({
@@ -175,7 +192,15 @@ async function syncProject(
 
   // 4. WooCommerce products (for idea/content generation). Prefer the
   // companion's server-side list (one call); else the paginated WC REST fetch.
-  const products = payload?.products ?? (await fetchProducts(auth, runner));
+  let products;
+  if (payload?.products) {
+    await setProgress(sb, projectId, `שומר ${payload.products.length} מוצרים…`);
+    products = payload.products;
+  } else {
+    products = await fetchProducts(auth, runner, (page, total) =>
+      setProgress(sb, projectId, "מסנכרן מוצרים", page, total)
+    );
+  }
   if (products.length) {
     const productRows = products.map((p) => ({
       project_id: projectId,
@@ -195,7 +220,17 @@ async function syncProject(
 
   await sb
     .from("projects")
-    .update({ last_post_at: latest, yoast_ready: yoast })
+    .update({
+      last_post_at: latest,
+      yoast_ready: yoast,
+      sync_progress: {
+        label: "הושלם",
+        done: true,
+        posts: posts.length,
+        products: products.length,
+        at: new Date().toISOString(),
+      },
+    })
     .eq("id", projectId);
 
   return {

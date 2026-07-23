@@ -3,7 +3,8 @@ import { RefreshCw, Save, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
-import { Alert, Button, Card, Input, Label } from "@/components/ui";
+import { Alert, Button, Card, Input, Label, Spinner } from "@/components/ui";
+import { useSyncProgress, formatSyncProgress } from "@/lib/useSyncProgress";
 import { CompanionSnippet } from "@/components/CompanionSnippet";
 import { KeywordsInput } from "@/components/KeywordsInput";
 import { GscPanel } from "@/components/GscPanel";
@@ -19,6 +20,7 @@ export function ProjectSettings() {
   const [busy, setBusy] = useState<null | "save" | "sync" | "delete" | "backfill">(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const progress = useSyncProgress(activeProject?.id, busy === "sync");
 
   useEffect(() => {
     if (!activeProject) return;
@@ -219,6 +221,13 @@ export function ProjectSettings() {
           </div>
           <CompanionSnippet token={activeProject.companion_token} />
         </Card>
+      )}
+
+      {busy === "sync" && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm text-[var(--text)]">
+          <Spinner className="size-4" />
+          <span>{progress ? formatSyncProgress(progress) : "מתחיל סנכרון…"}</span>
+        </div>
       )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

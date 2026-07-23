@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
 import { Button, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { useSyncProgress, formatSyncProgress } from "@/lib/useSyncProgress";
 
 interface Term {
   id: number;
@@ -82,6 +83,7 @@ export function PostsList({
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const progress = useSyncProgress(activeProject?.id, syncing);
 
   async function remove(p: PostRow) {
     if (!confirm(`למחוק את הפוסט "${p.title || "(ללא כותרת)"}" מהמערכת? הפעולה אינה מוחקת אותו מ-WordPress.`))
@@ -148,6 +150,13 @@ export function PostsList({
       </div>
 
       {error && <p className="mb-4 text-sm text-[var(--color-danger)]">{error}</p>}
+
+      {syncing && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm text-[var(--text)]">
+          <Spinner className="size-4" />
+          <span>{progress ? formatSyncProgress(progress) : "מתחיל סנכרון…"}</span>
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         {loading ? (
