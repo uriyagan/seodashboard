@@ -1,9 +1,34 @@
 import { useCallback, useEffect, useState } from "react";
-import { Lightbulb, Package, PenLine, Sparkles, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Gauge,
+  Lightbulb,
+  Package,
+  PenLine,
+  Search,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
 import { Alert, Button, Card, Spinner } from "@/components/ui";
+
+interface IdeaBrief {
+  summary: string;
+  angle: string;
+  main_topics: string[];
+  deep_dive_points: string[];
+  target_audience: string;
+  search_intent: string;
+  reader_value: string;
+  category_fit: string;
+  primary_keyword: string;
+  secondary_keywords: string[];
+  journey_stage: string;
+  seo_evidence_type: "external-data" | "qualitative-estimate";
+}
 
 interface Idea {
   id: string;
@@ -11,6 +36,23 @@ interface Idea {
   status: string;
   created_at: string;
   product_category_name: string | null;
+  brief: IdeaBrief | null;
+}
+
+const JOURNEY_LABEL: Record<string, string> = {
+  discovery: "גילוי",
+  comparison: "השוואה",
+  decision: "החלטה",
+  "post-purchase": "לאחר רכישה",
+};
+
+function Chip({ children, icon: Icon }: { children: React.ReactNode; icon?: typeof Package }) {
+  return (
+    <span className="flex w-fit items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs text-[var(--muted)]">
+      {Icon && <Icon className="size-3" />}
+      {children}
+    </span>
+  );
 }
 
 interface Category {
@@ -125,6 +167,136 @@ function CategoryModal({
   );
 }
 
+/** A single idea card — rich brief view (with expand/collapse) or a legacy flat card. */
+function IdeaCard({
+  idea,
+  writing,
+  onWrite,
+  onReject,
+}: {
+  idea: Idea;
+  writing: boolean;
+  onWrite: () => void;
+  onReject: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const b = idea.brief;
+
+  const actions = (
+    <div className="flex shrink-0 items-center gap-2">
+      <Button size="sm" onClick={onWrite} loading={writing}>
+        {!writing && <PenLine className="size-4" />}
+        יצירת פוסט
+      </Button>
+      <button
+        onClick={onReject}
+        className="flex size-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--color-danger)]"
+        aria-label="דחייה"
+        title="דחה רעיון"
+      >
+        <X className="size-4" />
+      </button>
+    </div>
+  );
+
+  // Legacy idea (no brief) — keep the original compact card.
+  if (!b) {
+    return (
+      <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <span className="font-medium text-[var(--text)]">{idea.title}</span>
+          {idea.product_category_name && (
+            <div className="mt-1.5">
+              <Chip icon={Package}>{idea.product_category_name}</Chip>
+            </div>
+          )}
+        </div>
+        {actions}
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="flex flex-col gap-3 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <span className="font-medium text-[var(--text)]">{idea.title}</span>
+        {actions}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {idea.product_category_name && <Chip icon={Package}>{idea.product_category_name}</Chip>}
+        {b.seo_evidence_type === "external-data" ? (
+          <Chip icon={Search}>מבוסס נתוני חיפוש</Chip>
+        ) : (
+          <Chip icon={Gauge}>הערכת הזדמנות תוכן</Chip>
+        )}
+      </div>
+
+      <p className="text-sm text-[var(--muted)]">{b.summary}</p>
+
+      {b.main_topics.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {b.main_topics.slice(0, 5).map((t, i) => (
+            <Chip key={i}>{t}</Chip>
+          ))}
+        </div>
+      )}
+
+      <div className="text-xs text-[var(--muted)]">
+        כוונת חיפוש: <span className="text-[var(--text)]">{b.search_intent}</span> · מילת מפתח:{" "}
+        <span className="text-[var(--text)]">{b.primary_keyword}</span>
+      </div>
+
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-fit items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--text)]"
+      >
+        {expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        {expanded ? "סגירת פרטים" : "פרטים מלאים"}
+      </button>
+
+      {expanded && (
+        <div className="space-y-3 border-t border-[var(--border)] pt-3 text-sm">
+          <Detail label="זווית מרכזית">{b.angle}</Detail>
+          {b.deep_dive_points.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-[var(--muted)]">נקודות להעמקה</p>
+              <ul className="list-disc space-y-0.5 pr-5 text-[var(--text)]">
+                {b.deep_dive_points.map((p, i) => (
+                  <li key={i}>{p}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <Detail label="קהל יעד">{b.target_audience}</Detail>
+          <Detail label="ערך מעשי לקורא">{b.reader_value}</Detail>
+          <Detail label="התאמה לקטגוריה">{b.category_fit}</Detail>
+          <Detail label="שלב במסע הלקוח">{JOURNEY_LABEL[b.journey_stage] ?? b.journey_stage}</Detail>
+          {b.secondary_keywords.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-[var(--muted)]">מילות מפתח משניות</p>
+              <div className="flex flex-wrap gap-1.5">
+                {b.secondary_keywords.map((k, i) => (
+                  <Chip key={i}>{k}</Chip>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <span className="text-xs font-medium text-[var(--muted)]">{label}: </span>
+      <span className="text-[var(--text)]">{children}</span>
+    </div>
+  );
+}
+
 export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void }) {
   const { activeProject } = useProjects();
   const [ideas, setIdeas] = useState<Idea[]>([]);
@@ -139,7 +311,7 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
     setLoading(true);
     const { data } = await supabase
       .from("ideas")
-      .select("id, title, status, created_at, product_category_name")
+      .select("id, title, status, created_at, product_category_name, brief")
       .eq("project_id", activeProject.id)
       .eq("status", "suggested")
       .order("created_at", { ascending: false });
@@ -201,7 +373,7 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
         <div>
           <h1 className="text-2xl font-bold text-[var(--text)]">רעיונות לפוסטים</h1>
           <p className="text-sm text-[var(--muted)]">
-            Gemini מציע פוסטים חדשים לפי קטגוריות המוצרים והמלאי בחנות
+            מחקר SEO קצר (נתוני חיפוש כשזמינים) + בריף מפורט לכל רעיון, לפי קטגוריות המוצרים והמלאי
           </p>
         </div>
         <Button className="shrink-0" onClick={() => setModalOpen(true)} loading={generating}>
@@ -226,31 +398,13 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
       ) : (
         <div className="grid gap-3">
           {ideas.map((idea) => (
-            <Card key={idea.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <span className="font-medium text-[var(--text)]">{idea.title}</span>
-                {idea.product_category_name && (
-                  <span className="mt-1.5 flex w-fit items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs text-[var(--muted)]">
-                    <Package className="size-3" />
-                    {idea.product_category_name}
-                  </span>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Button size="sm" onClick={() => write(idea)} loading={writingId === idea.id}>
-                  {writingId !== idea.id && <PenLine className="size-4" />}
-                  כתוב פוסט
-                </Button>
-                <button
-                  onClick={() => reject(idea.id)}
-                  className="flex size-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--color-danger)]"
-                  aria-label="דחייה"
-                  title="דחה רעיון"
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-            </Card>
+            <IdeaCard
+              key={idea.id}
+              idea={idea}
+              writing={writingId === idea.id}
+              onWrite={() => write(idea)}
+              onReject={() => reject(idea.id)}
+            />
           ))}
         </div>
       )}

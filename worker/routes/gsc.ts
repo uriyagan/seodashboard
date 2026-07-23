@@ -65,7 +65,7 @@ interface ConnRow {
 }
 
 /** Loads the caller's connection (RLS-scoped) and returns a fresh access token, refreshing if needed. */
-async function accessToken(
+export async function accessToken(
   env: Env,
   sb: SupabaseClient
 ): Promise<{ token: string; email: string | null } | null> {
@@ -299,7 +299,7 @@ function periods() {
   };
 }
 
-async function scQuery(
+export async function scQuery(
   token: string,
   property: string,
   body: Record<string, unknown>

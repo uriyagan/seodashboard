@@ -1,10 +1,13 @@
 import {
   forwardRef,
+  useEffect,
+  useRef,
+  useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
 } from "react";
-import { Loader2 } from "lucide-react";
+import { Info, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ---------------------------------- Button --------------------------------- */
@@ -123,6 +126,41 @@ export function Alert({
   return (
     <div className={cn("rounded-lg border px-3.5 py-2.5 text-sm", styles[variant])}>
       {children}
+    </div>
+  );
+}
+
+/* ------------------------------ Info popover ------------------------------- */
+/** A small "?" info button that toggles a floating explanation card (RTL). */
+export function InfoPopover({ children, label = "מידע" }: { children: ReactNode; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex size-9 items-center justify-center rounded-lg text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
+        aria-label={label}
+        title={label}
+      >
+        <Info className="size-[18px]" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-2 w-72 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-sm leading-relaxed text-[var(--muted)] shadow-xl">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

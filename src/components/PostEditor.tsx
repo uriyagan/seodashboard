@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
+  ExternalLink,
   ImagePlus,
   Maximize2,
   Package,
@@ -17,10 +18,12 @@ import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
 import { Alert, Button, Card, Input, Label, Spinner } from "@/components/ui";
 import { TermSelect, type Term } from "@/components/TermSelect";
-import { RichEditor } from "@/components/RichEditor";
+import { RichEditor, type RichEditorHandle } from "@/components/RichEditor";
+import { WpMediaPicker } from "@/components/WpMediaPicker";
 import { YoastAnalysis } from "@/components/YoastAnalysis";
 import { InternalLinks } from "@/components/InternalLinks";
 import { measureTitleWidth } from "@/lib/yoast";
+import { cn } from "@/lib/utils";
 
 /** Approximate the post slug from its title (keeps Hebrew letters). */
 function slugify(s: string): string {
@@ -44,12 +47,14 @@ function ProductPicker({
   selected,
   onClose,
   onConfirm,
+  title = "בחירת מוצרים לשילוב בתמונה",
 }: {
   projectId: string;
   categoryId: number | null;
   selected: PickedProduct[];
   onClose: () => void;
   onConfirm: (products: PickedProduct[]) => void;
+  title?: string;
 }) {
   const [products, setProducts] = useState<PickedProduct[] | null>(null);
   const [picked, setPicked] = useState<PickedProduct[]>(selected);
@@ -85,7 +90,7 @@ function ProductPicker({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-          <h2 className="text-lg font-bold text-[var(--text)]">בחירת מוצרים לשילוב בתמונה</h2>
+          <h2 className="text-lg font-bold text-[var(--text)]">{title}</h2>
           <button
             onClick={onClose}
             className="flex size-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)]"
@@ -155,6 +160,7 @@ interface EditorState {
   product_category_id: number | null;
   product_category_name: string | null;
   product_names: string[];
+  link: string | null;
 }
 
 const BLANK: EditorState = {
@@ -173,6 +179,7 @@ const BLANK: EditorState = {
   product_category_id: null,
   product_category_name: null,
   product_names: [],
+  link: null,
 };
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -181,6 +188,38 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "pending", label: "ממתין לבדיקה" },
   { value: "private", label: "פרטי" },
 ];
+
+/** View-on-site / draft-preview button. Disabled with an explanation when the
+ *  post has no WordPress URL yet (not pushed). */
+function ViewOnSiteButton({ link, published }: { link: string | null; published: boolean }) {
+  const base = "inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] px-4 text-sm";
+  if (!link) {
+    return (
+      <button
+        type="button"
+        disabled
+        title="הפוסט עדיין לא נשמר ל-WordPress — אין כתובת צפייה"
+        className={cn(base, "cursor-not-allowed text-[var(--muted)] opacity-60")}
+      >
+        <ExternalLink className="size-4" />
+        צפייה באתר
+      </button>
+    );
+  }
+  const href = published ? link : `${link}${link.includes("?") ? "&" : "?"}preview=true`;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title={published ? "פתיחת הפוסט באתר" : "תצוגה מקדימה — דורש התחברות לוורדפרס באותו דפדפן"}
+      className={cn(base, "bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--surface-2)]")}
+    >
+      <ExternalLink className="size-4" />
+      {published ? "צפייה באתר" : "תצוגה מקדימה"}
+    </a>
+  );
+}
 
 export function PostEditor({
   postId,
@@ -205,6 +244,50 @@ export function PostEditor({
   const [lightbox, setLightbox] = useState(false);
   const [pickedProducts, setPickedProducts] = useState<PickedProduct[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [productCats, setProductCats] = useState<{ wp_id: number; title: string }[]>([]);
+  // Body-image insertion.
+  const editorRef = useRef<RichEditorHandle | null>(null);
+  const [wpPickerOpen, setWpPickerOpen] = useState(false);
+  const [productInsertOpen, setProductInsertOpen] = useState(false);
+
+  // Full product-category list (all, not only ≥5-product ones) for manual assignment.
+  useEffect(() => {
+    if (!activeProject) return;
+    supabase
+      .from("link_targets")
+      .select("wp_id, title")
+      .eq("project_id", activeProject.id)
+      .eq("type", "product_cat")
+      .order("title")
+      .then(({ data }) => setProductCats((data ?? []) as { wp_id: number; title: string }[]));
+  }, [activeProject]);
+
+  /** Uploads a body image (base64) to the WordPress media library → public URL. */
+  async function uploadBodyImage(base64: string, filename: string, mimeType: string) {
+    // Sanitize Hebrew/odd filenames — some hosts reject non-ASCII Content-Disposition.
+    const safe = /^[\w.\-]+$/.test(filename) ? filename : `image-${Date.now()}.png`;
+    const r = await api<{ ok: boolean; url?: string; error?: string }>(
+      `/api/projects/${activeProject!.id}/media`,
+      { base64, mimeType, filename: safe }
+    );
+    if (!r.ok || !r.url) throw new Error(r.error || "העלאת התמונה נכשלה");
+    return { url: r.url };
+  }
+
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  /** Inserts picked product images as captioned figures at the caret. */
+  function insertProductImages(products: PickedProduct[]) {
+    const html = products
+      .filter((p) => p.image_url)
+      .map(
+        (p) =>
+          `<figure class="image"><img src="${p.image_url}" alt="${escapeHtml(p.name)}"/><figcaption>${escapeHtml(p.name)}</figcaption></figure>`
+      )
+      .join("");
+    if (html) editorRef.current?.insertContent(html);
+  }
 
   function removeFeatured() {
     setState((s) => ({ ...s, featured_image_url: "", featured_media: null }));
@@ -283,6 +366,7 @@ export function PostEditor({
           product_category_id: (data.product_category_id as number | null) ?? null,
           product_category_name: (data.product_category_name as string | null) ?? null,
           product_names: (data.product_names as string[] | null) ?? [],
+          link: (data.link as string | null) ?? null,
         });
       }
       setLoading(false);
@@ -292,12 +376,20 @@ export function PostEditor({
   if (!activeProject) return null;
 
   async function saveLocal(): Promise<string | null> {
+    // Upload any pasted/dropped images to WP first so no blob:/data: URIs are
+    // persisted, then read the freshest content (src rewritten to WP URLs).
+    let contentHtml = state.content_html;
+    try {
+      await editorRef.current?.uploadImages();
+      contentHtml = editorRef.current?.getContent() ?? state.content_html;
+      if (contentHtml !== state.content_html) set("content_html", contentHtml);
+    } catch { /* upload errors surface via the editor UI */ }
     const row = {
       id: state.id ?? undefined,
       project_id: activeProject!.id,
       wp_post_id: state.wp_post_id,
       title: state.title,
-      content_html: state.content_html,
+      content_html: contentHtml,
       focus_keyword: state.focus_keyword,
       seo_title: state.seo_title,
       meta_description: state.meta_description,
@@ -336,13 +428,15 @@ export function PostEditor({
     setNotice(null);
     try {
       await saveLocal();
-      const r = await api<{ ok: boolean; wpId?: number; status?: string; error?: string }>(
+      // saveLocal uploaded images + refreshed content — use the freshest HTML.
+      const contentHtml = editorRef.current?.getContent() ?? state.content_html;
+      const r = await api<{ ok: boolean; wpId?: number; status?: string; link?: string; error?: string }>(
         `/api/projects/${activeProject!.id}/posts/push`,
         {
           postId: state.id,
           wpId: state.wp_post_id,
           title: state.title,
-          content_html: state.content_html,
+          content_html: contentHtml,
           status: state.status,
           categories: state.categories,
           tags: state.tags,
@@ -355,6 +449,7 @@ export function PostEditor({
       );
       if (!r.ok) throw new Error(r.error || "הדחיפה נכשלה");
       if (r.wpId) set("wp_post_id", r.wpId);
+      if (r.link) set("link", r.link);
       const label = STATUS_OPTIONS.find((s) => s.value === state.status)?.label ?? "";
       setNotice(`נשמר ל-WordPress (${label}) בהצלחה ✓`);
     } catch (e) {
@@ -515,6 +610,7 @@ export function PostEditor({
               ))}
             </select>
           </div>
+          <ViewOnSiteButton link={state.link} published={state.status === "publish"} />
           <Button variant="outline" onClick={onSave} loading={busy === "save"}>
             <Save className="size-4" />
             שמירה מקומית
@@ -540,20 +636,35 @@ export function PostEditor({
               placeholder="כותרת הפוסט"
               className="h-14 !text-xl font-bold"
             />
-            {state.product_category_name && (
-              <span className="flex w-fit items-center gap-1 rounded-md bg-[var(--surface-2)] px-2.5 py-1 text-xs text-[var(--muted)]">
-                <Package className="size-3.5" />
-                קטגוריית מוצרים: {state.product_category_name}
-              </span>
-            )}
             <Button variant="outline" onClick={onWriteAI} loading={busy === "write"} className="w-full">
               <Wand2 className="size-4" />
               כתוב את הפוסט עם Gemini (לפי הכותרת)
             </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => setWpPickerOpen(true)}>
+                <ImagePlus className="size-4" />
+                תמונה מספריית המדיה
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setProductInsertOpen(true)}
+                disabled={!state.product_category_id}
+                title={state.product_category_id ? undefined : "יש לשייך קטגוריית מוצר תחילה"}
+              >
+                <Package className="size-4" />
+                תמונת מוצר לתוכן
+              </Button>
+              <span className="self-center text-xs text-[var(--muted)]">
+                העלאה מהמחשב, הדבקה או URL — דרך כפתור התמונה בסרגל העורך.
+              </span>
+            </div>
             <div className="min-h-0 flex-1">
               <RichEditor
                 value={state.content_html}
                 onChange={(html) => set("content_html", html)}
+                onInit={(ed) => (editorRef.current = ed)}
+                onUploadImage={uploadBodyImage}
               />
             </div>
           </div>
@@ -690,11 +801,40 @@ export function PostEditor({
 
             {/* Taxonomies */}
             <Card className="space-y-4 p-4">
+              <div>
+                <Label className="mb-1.5 flex items-center gap-1">
+                  <Package className="size-3.5" />
+                  קטגוריית מוצר (SEODSH)
+                </Label>
+                <select
+                  value={state.product_category_id ?? ""}
+                  onChange={(e) => {
+                    const id = e.target.value ? Number(e.target.value) : null;
+                    const name = productCats.find((c) => c.wp_id === id)?.title ?? null;
+                    // Clear product_names — they belonged to the previous category.
+                    setState((s) => ({
+                      ...s,
+                      product_category_id: id,
+                      product_category_name: name,
+                      product_names: [],
+                    }));
+                  }}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none"
+                >
+                  <option value="">ללא שיוך</option>
+                  {productCats.map((c) => (
+                    <option key={c.wp_id} value={c.wp_id}>{c.title}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  הקטגוריה שאליה משויכת הכתבה במערכת — משמשת את מנוע הרעיונות והתוכן.
+                </p>
+              </div>
               <TermSelect
                 projectId={activeProject.id}
                 taxonomy="category"
                 apiTaxonomy="categories"
-                label="קטגוריות"
+                label="קטגוריות WordPress"
                 selected={state.categories}
                 onChange={(t) => set("categories", t)}
               />
@@ -772,6 +912,35 @@ export function PostEditor({
           onConfirm={(products) => {
             setPickedProducts(products);
             setPickerOpen(false);
+          }}
+        />
+      )}
+
+      {/* Product picker for inserting images into the body */}
+      {productInsertOpen && (
+        <ProductPicker
+          projectId={activeProject.id}
+          categoryId={state.product_category_id}
+          selected={[]}
+          title="בחירת תמונות מוצר לשילוב בתוכן"
+          onClose={() => setProductInsertOpen(false)}
+          onConfirm={(products) => {
+            insertProductImages(products);
+            setProductInsertOpen(false);
+          }}
+        />
+      )}
+
+      {/* WordPress media library picker */}
+      {wpPickerOpen && (
+        <WpMediaPicker
+          projectId={activeProject.id}
+          onClose={() => setWpPickerOpen(false)}
+          onPick={({ url, alt }) => {
+            editorRef.current?.insertContent(
+              `<img src="${url}" alt="${escapeHtml(alt)}"/>`
+            );
+            setWpPickerOpen(false);
           }}
         />
       )}

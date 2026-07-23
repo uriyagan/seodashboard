@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
-import { Eye, FileText, Image as ImageIcon, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Eye, FileText, Image as ImageIcon, Package, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { api } from "@/lib/api";
 import { useProjects } from "@/lib/projects";
-import { Button, Card, Spinner } from "@/components/ui";
+import { Alert, Button, Card, InfoPopover, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useSyncProgress, formatSyncProgress } from "@/lib/useSyncProgress";
 
@@ -21,9 +21,20 @@ interface PostRow {
   featured_image_url: string | null;
   categories: Term[];
   tags: Term[];
+  product_category_id: number | null;
+  product_category_name: string | null;
   published_at: string | null;
   pushed_at: string | null;
   updated_at: string;
+}
+
+const NO_CATEGORY = "__none__";
+
+interface SyncCounts {
+  posts?: number;
+  categories?: number;
+  tags?: number;
+  products?: number;
 }
 
 const STATUS_HE: Record<string, { label: string; solid?: boolean }> = {
@@ -83,6 +94,9 @@ export function PostsList({
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [catFilter, setCatFilter] = useState<string>("");
+  const [lastSync, setLastSync] = useState<SyncCounts | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
   const progress = useSyncProgress(activeProject?.id, syncing);
 
   async function remove(p: PostRow) {
@@ -101,7 +115,7 @@ export function PostsList({
     setLoading(true);
     const { data, error } = await supabase
       .from("posts")
-      .select("id, wp_post_id, title, wp_status, link, featured_thumb_url, featured_image_url, categories, tags, published_at, pushed_at, updated_at")
+      .select("id, wp_post_id, title, wp_status, link, featured_thumb_url, featured_image_url, categories, tags, product_category_id, product_category_name, published_at, pushed_at, updated_at")
       .eq("project_id", activeProject.id)
       // Newest first, so freshly created posts appear at the top.
       .order("created_at", { ascending: false });
@@ -118,8 +132,10 @@ export function PostsList({
     if (!activeProject) return;
     setSyncing(true);
     setError(null);
+    setLastSync(null);
     try {
-      await api(`/api/projects/${activeProject.id}/sync`);
+      const r = await api<SyncCounts>(`/api/projects/${activeProject.id}/sync`);
+      setLastSync(r);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "סנכרון נכשל");
@@ -128,6 +144,38 @@ export function PostsList({
     }
   }
 
+  async function backfill() {
+    if (!activeProject) return;
+    setBackfilling(true);
+    setError(null);
+    try {
+      await api(`/api/projects/${activeProject.id}/backfill-categories`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "שיוך אוטומטי נכשל");
+    } finally {
+      setBackfilling(false);
+    }
+  }
+
+  // Distinct product categories among loaded posts, for the filter dropdown.
+  const categoryOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const p of posts) if (p.product_category_name) names.add(p.product_category_name);
+    return [...names].sort((a, b) => a.localeCompare(b, "he"));
+  }, [posts]);
+
+  const unassignedCount = useMemo(
+    () => posts.filter((p) => !p.product_category_name).length,
+    [posts]
+  );
+
+  const visiblePosts = useMemo(() => {
+    if (!catFilter) return posts;
+    if (catFilter === NO_CATEGORY) return posts.filter((p) => !p.product_category_name);
+    return posts.filter((p) => p.product_category_name === catFilter);
+  }, [posts, catFilter]);
+
   if (!activeProject) return null;
 
   return (
@@ -135,9 +183,18 @@ export function PostsList({
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--text)]">פוסטים</h1>
-          <p className="text-sm text-[var(--muted)]">{posts.length} פוסטים בפרויקט</p>
+          <p className="text-sm text-[var(--muted)]">
+            {catFilter ? `מציג ${visiblePosts.length} מתוך ${posts.length}` : `${posts.length} פוסטים בפרויקט`}
+          </p>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 items-center gap-2">
+          <InfoPopover label="מה הסנכרון עושה?">
+            <p className="mb-2 font-medium text-[var(--text)]">מה קורה בסנכרון?</p>
+            הסנכרון מושך מהאתר שלך את הפוסטים והסטטוסים, הקטגוריות והתגיות, העמודים,
+            קטגוריות המוצרים והמוצרים מהחנות. המידע משמש את מחולל הרעיונות, שיוך
+            קטגוריית המוצר להצעות הקישורים הפנימיים.
+            <p className="mt-2 text-[var(--text)]">הסנכרון קורא בלבד — אינו משנה דבר באתר.</p>
+          </InfoPopover>
           <Button variant="outline" onClick={resync} loading={syncing}>
             {!syncing && <RefreshCw className="size-4" />}
             סנכרון מחדש
@@ -155,6 +212,38 @@ export function PostsList({
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm text-[var(--text)]">
           <Spinner className="size-4" />
           <span>{progress ? formatSyncProgress(progress) : "מתחיל סנכרון…"}</span>
+        </div>
+      )}
+
+      {lastSync && !syncing && (
+        <div className="mb-4">
+          <Alert variant="success">
+            הסנכרון הושלם ✓ עודכנו {lastSync.posts ?? 0} פוסטים, {lastSync.categories ?? 0} קטגוריות,{" "}
+            {lastSync.tags ?? 0} תגיות ו-{lastSync.products ?? 0} מוצרים.
+          </Alert>
+        </div>
+      )}
+
+      {(categoryOptions.length > 0 || unassignedCount > 0) && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <label className="text-sm text-[var(--muted)]">סינון לפי קטגוריית מוצר:</label>
+          <select
+            value={catFilter}
+            onChange={(e) => setCatFilter(e.target.value)}
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none"
+          >
+            <option value="">הכל</option>
+            {unassignedCount > 0 && <option value={NO_CATEGORY}>ללא שיוך ({unassignedCount})</option>}
+            {categoryOptions.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+          {unassignedCount > 0 && (
+            <Button size="sm" variant="ghost" onClick={backfill} loading={backfilling}>
+              {!backfilling && <Package className="size-4" />}
+              שיוך אוטומטי ({unassignedCount})
+            </Button>
+          )}
         </div>
       )}
 
@@ -177,7 +266,7 @@ export function PostsList({
                 <tr className="border-b border-[var(--border)] text-[var(--muted)]">
                   <th className="px-4 py-3 font-medium">תמונה</th>
                   <th className="px-4 py-3 font-medium">כותרת</th>
-                  <th className="px-4 py-3 font-medium">קטגוריות</th>
+                  <th className="px-4 py-3 font-medium">קטגוריית מוצר</th>
                   <th className="hidden px-4 py-3 font-medium md:table-cell">תגיות</th>
                   <th className="px-4 py-3 font-medium">סטטוס</th>
                   <th className="hidden px-4 py-3 font-medium sm:table-cell">תאריך</th>
@@ -185,7 +274,7 @@ export function PostsList({
                 </tr>
               </thead>
               <tbody>
-                {posts.map((p) => (
+                {visiblePosts.map((p) => (
                   <tr
                     key={p.id}
                     onClick={() => onEdit(p.id)}
@@ -208,7 +297,16 @@ export function PostsList({
                       <span className="line-clamp-2">{p.title || "(ללא כותרת)"}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <TermPills terms={p.categories} />
+                      {p.product_category_name ? (
+                        <span className="flex w-fit items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs text-[var(--muted)]">
+                          <Package className="size-3" />
+                          {p.product_category_name}
+                        </span>
+                      ) : (
+                        <span className="rounded-md border border-dashed border-[var(--border)] px-2 py-0.5 text-xs text-[var(--muted)]">
+                          ללא שיוך
+                        </span>
+                      )}
                     </td>
                     <td className="hidden px-4 py-3 md:table-cell">
                       <TermPills terms={p.tags} />

@@ -8,8 +8,12 @@ import {
   generateArticle,
   generateImage,
   assignCategoriesToTitles,
+  type IdeaBrief,
+  type IdeaResearch,
 } from "../lib/gemini";
 import { uploadMedia } from "../lib/wordpress";
+import { accessToken, scQuery } from "./gsc";
+import type { ProjectRow } from "../lib/project";
 import {
   loadProducts,
   eligibleCategories,
@@ -30,6 +34,45 @@ async function categoryNames(
     .eq("project_id", projectId)
     .eq("type", "product_cat");
   return new Map((data ?? []).map((t: { wp_id: number; title: string }) => [t.wp_id, t.title]));
+}
+
+/**
+ * Fetches the project's real Search Console queries (last 90 days) for the SEO
+ * research step. Returns undefined on any failure or when GSC isn't configured
+ * — the caller then degrades to a qualitative estimate (never fake numbers).
+ */
+async function fetchGscQueries(
+  env: Env,
+  sb: SupabaseClient,
+  project: ProjectRow
+): Promise<IdeaResearch["gscQueries"]> {
+  if (!project.gsc_property) return undefined;
+  try {
+    const at = await accessToken(env, sb);
+    if (!at) return undefined;
+    const end = new Date();
+    const start = new Date(end.getTime() - 90 * 86_400_000);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const body = await scQuery(at.token, project.gsc_property, {
+      startDate: fmt(start),
+      endDate: fmt(end),
+      dimensions: ["query"],
+      rowLimit: 100,
+    });
+    const rows = (body.rows ?? [])
+      .map((r) => ({
+        query: r.keys?.[0] ?? "",
+        clicks: r.clicks,
+        impressions: r.impressions,
+        position: r.position,
+      }))
+      .filter((r) => r.query);
+    if (!rows.length) return undefined;
+    rows.sort((a, b) => b.impressions - a.impressions);
+    return rows.slice(0, 50); // cap prompt size
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -63,15 +106,37 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
     .json<{ categoryIds?: number[] }>()
     .catch(() => ({ categoryIds: undefined }));
 
-  const [products, names, postsRes, pendingRes] = await Promise.all([
+  const [products, names, postsRes, ideasRes, gscQueries] = await Promise.all([
     loadProducts(sb, projectId),
     categoryNames(sb, projectId),
-    sb.from("posts").select("title").eq("project_id", projectId),
-    sb.from("ideas").select("title").eq("project_id", projectId).eq("status", "suggested"),
+    sb
+      .from("posts")
+      .select("title, focus_keyword")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false })
+      .limit(100),
+    // Dedup against ALL ideas ever (suggested, written, rejected) — not just
+    // pending — so a rejected idea can't be re-suggested.
+    sb
+      .from("ideas")
+      .select("title")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false })
+      .limit(200),
+    fetchGscQueries(c.env, sb, project),
   ]);
 
   const existingTitles = (postsRes.data ?? []).map((p: { title: string }) => p.title).filter(Boolean);
-  const pendingTitles = (pendingRes.data ?? []).map((i: { title: string }) => i.title).filter(Boolean);
+  const research: IdeaResearch = {
+    gscQueries,
+    existingPosts: (postsRes.data ?? []).filter((p: { title: string }) => p.title),
+    allIdeaTitles: (ideasRes.data ?? []).map((i: { title: string }) => i.title).filter(Boolean),
+  };
+  const evidence: IdeaBrief["seo_evidence_type"] = gscQueries ? "external-data" : "qualitative-estimate";
+  const withEvidence = (brief: Omit<IdeaBrief, "seo_evidence_type">): IdeaBrief => ({
+    ...brief,
+    seo_evidence_type: evidence,
+  });
 
   const allEligible = eligibleCategories(products, names, 5);
   let eligible = allEligible;
@@ -84,20 +149,20 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
   // general ideas from the existing content, with no category association.
   if (!allEligible.length) {
     try {
-      const titles = await generateIdeas(
-        c.env,
-        project.content_prompt,
-        [...existingTitles, ...pendingTitles],
-        10
-      );
-      const rows = titles
-        .filter(Boolean)
-        .map((title) => ({ project_id: projectId, title, status: "suggested" }));
+      const suggestions = await generateIdeas(c.env, project.content_prompt, research, 6);
+      const rows = suggestions
+        .filter((s) => s.title)
+        .map((s) => ({
+          project_id: projectId,
+          title: s.title,
+          status: "suggested",
+          brief: withEvidence(s.brief),
+        }));
       if (!rows.length) return c.json({ ok: true, ideas: [] });
       const { data, error } = await sb
         .from("ideas")
         .insert(rows)
-        .select("id, title, status, created_at, product_category_name");
+        .select("id, title, status, created_at, product_category_name, brief");
       if (error) throw error;
       return c.json({ ok: true, ideas: data });
     } catch (e) {
@@ -125,9 +190,8 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
       c.env,
       project.content_prompt,
       catalog,
-      existingTitles,
-      pendingTitles,
-      10
+      research,
+      6
     );
 
     const rows = suggestions
@@ -139,13 +203,14 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
         product_category_id: s.category_id,
         product_category_name: names.get(s.category_id) ?? null,
         product_names: topProductsForCategory(products, s.category_id, 50),
+        brief: withEvidence(s.brief),
       }));
     if (!rows.length) return c.json({ ok: true, ideas: [] });
 
     const { data, error } = await sb
       .from("ideas")
       .insert(rows)
-      .select("id, title, status, created_at, product_category_name");
+      .select("id, title, status, created_at, product_category_name, brief");
     if (error) throw error;
     return c.json({ ok: true, ideas: data });
   } catch (e) {
@@ -221,13 +286,14 @@ ideas.post("/api/projects/:id/ideas/:ideaId/write", async (c) => {
 
   const { data: idea } = await sb
     .from("ideas")
-    .select("id, title, product_category_id, product_category_name, product_names")
+    .select("id, title, product_category_id, product_category_name, product_names, brief")
     .eq("id", ideaId)
     .single();
   if (!idea) return c.json({ error: "idea not found" }, 404);
 
   try {
-    // 1. Article — written around the idea's product category & products.
+    // 1. Article — written around the idea's full content brief (when present)
+    //    plus its product category & products.
     const article = await generateArticle(
       c.env,
       project.content_prompt,
@@ -236,6 +302,7 @@ ideas.post("/api/projects/:id/ideas/:ideaId/write", async (c) => {
       {
         categoryName: idea.product_category_name ?? undefined,
         productNames: (idea.product_names as string[]) ?? [],
+        brief: (idea.brief as IdeaBrief | null) ?? undefined,
       }
     );
 

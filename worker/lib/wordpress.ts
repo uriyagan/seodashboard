@@ -362,7 +362,7 @@ export async function pushPost(
   auth: WpAuth,
   input: PushPostInput,
   runner?: CompanionRunner
-): Promise<number> {
+): Promise<{ id: number; link: string }> {
   const route = input.wpId ? `/wp/v2/posts/${input.wpId}` : "/wp/v2/posts";
   const body: Record<string, unknown> = {
     title: input.title,
@@ -387,7 +387,8 @@ export async function pushPost(
   if (r.status >= 400) {
     throw new Error(`push post failed: HTTP ${r.status} ${r.text.slice(0, 200)}`);
   }
-  return (JSON.parse(r.text) as { id: number }).id;
+  const parsed = JSON.parse(r.text) as { id: number; link?: string };
+  return { id: parsed.id, link: parsed.link ?? "" };
 }
 
 /** Creates a new category or tag; returns its id + name. */
@@ -407,6 +408,49 @@ export async function createTerm(
   }
   const json = JSON.parse(r.text) as { id: number; name: string; slug: string };
   return { id: json.id, name: json.name, slug: json.slug };
+}
+
+export interface WpMediaItem {
+  id: number;
+  url: string;
+  thumb: string;
+  alt: string;
+  title: string;
+}
+
+/** Lists image attachments from the WordPress media library (paginated, 24/page). */
+export async function listMedia(
+  auth: WpAuth,
+  page: number,
+  runner?: CompanionRunner
+): Promise<{ items: WpMediaItem[]; totalPages: number }> {
+  const r = await wpFetch(auth.siteUrl, auth, "/wp/v2/media", {}, {
+    media_type: "image",
+    per_page: 24,
+    page,
+    _fields: "id,source_url,alt_text,title,media_details",
+  }, runner);
+  if (r.status >= 400) return { items: [], totalPages: 0 };
+  const batch = JSON.parse(r.text) as Array<{
+    id: number;
+    source_url: string;
+    alt_text?: string;
+    title?: { rendered?: string };
+    media_details?: { sizes?: { thumbnail?: { source_url?: string }; medium?: { source_url?: string } } };
+  }>;
+  return {
+    items: batch.map((m) => ({
+      id: m.id,
+      url: m.source_url,
+      thumb:
+        m.media_details?.sizes?.thumbnail?.source_url ??
+        m.media_details?.sizes?.medium?.source_url ??
+        m.source_url,
+      alt: m.alt_text ?? "",
+      title: m.title?.rendered ?? "",
+    })),
+    totalPages: Number(r.headers.get("X-WP-TotalPages") ?? "1"),
+  };
 }
 
 /** Uploads an image to the WordPress media library; returns id + source URL. */

@@ -8,6 +8,7 @@ import {
   pushPost,
   createTerm,
   uploadMedia,
+  listMedia,
 } from "../lib/wordpress";
 import { replaceSourceLinks } from "../lib/links";
 
@@ -61,7 +62,7 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
   try {
     const auth = await projectAuth(c.env, project);
     const runner = makeCompanionRunner(sb, projectId);
-    const wpId = await pushPost(auth, {
+    const { id: wpId, link } = await pushPost(auth, {
       wpId: body.wpId,
       title: body.title,
       content_html: body.content_html,
@@ -90,6 +91,8 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
       published_at: status === "publish" ? new Date().toISOString() : null,
       pushed_at: new Date().toISOString(),
     };
+    // Capture the WP permalink the push returned (used for view-on-site / preview).
+    if (link) row.link = link;
     // Update the existing local row (by primary key) when the editor already
     // saved one — otherwise a second row would be created (the duplicate bug).
     // Fall back to conflict-on-wp_post_id for rows that arrived via sync.
@@ -104,12 +107,6 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
     // Keep the internal-links inventory current for this post. Best-effort —
     // link bookkeeping must never fail a push.
     try {
-      const { data: localRow } = await sb
-        .from("posts")
-        .select("link")
-        .eq("project_id", projectId)
-        .eq("wp_post_id", wpId)
-        .maybeSingle();
       await replaceSourceLinks(
         sb,
         projectId,
@@ -117,16 +114,33 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
         "post",
         wpId,
         body.title,
-        (localRow?.link as string) ?? "",
+        link,
         body.content_html
       );
     } catch {
       // ignore
     }
 
-    return c.json({ ok: true, wpId, status });
+    return c.json({ ok: true, wpId, status, link });
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : "push failed" }, 500);
+  }
+});
+
+/** Lists images from the WordPress media library (for inserting into post body). */
+posts.get("/api/projects/:id/media-list", async (c) => {
+  const sb = await requireAdmin(c.env, c.req.raw);
+  if (!sb) return c.json({ error: "unauthorized" }, 401);
+  const project = await loadProject(sb, c.req.param("id"));
+  if (!project) return c.json({ error: "project not found" }, 404);
+  const page = Math.max(1, Number(c.req.query("page") ?? "1"));
+  try {
+    const auth = await projectAuth(c.env, project);
+    const runner = makeCompanionRunner(sb, project.id);
+    const { items, totalPages } = await listMedia(auth, page, runner);
+    return c.json({ ok: true, items, totalPages });
+  } catch (e) {
+    return c.json({ ok: false, error: e instanceof Error ? e.message : "failed" }, 500);
   }
 });
 
@@ -182,7 +196,8 @@ posts.post("/api/projects/:id/media", async (c) => {
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     const media = await uploadMedia(auth, bytes, filename || "image.png", mimeType || "image/png");
-    return c.json({ ok: true, ...media });
+    // Return both `id` and `mediaId` — the editor reads `mediaId` to set featured_media.
+    return c.json({ ok: true, id: media.id, mediaId: media.id, url: media.url });
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : "failed" }, 500);
   }
