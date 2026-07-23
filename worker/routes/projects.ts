@@ -173,8 +173,9 @@ async function syncProject(
     await sb.from("link_targets").upsert(linkRows, { onConflict: "project_id,type,wp_id" });
   }
 
-  // 4. WooCommerce products (for idea/content generation). Absent → skipped.
-  const products = await fetchProducts(auth, runner);
+  // 4. WooCommerce products (for idea/content generation). Prefer the
+  // companion's server-side list (one call); else the paginated WC REST fetch.
+  const products = payload?.products ?? (await fetchProducts(auth, runner));
   if (products.length) {
     const productRows = products.map((p) => ({
       project_id: projectId,

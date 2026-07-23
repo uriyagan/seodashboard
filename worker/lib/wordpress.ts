@@ -445,6 +445,9 @@ export interface SyncPayload {
   pages: LinkTarget[];
   productCategories: LinkTarget[];
   productTags: LinkTarget[];
+  /** Products returned server-side by the companion (undefined if the snippet
+   *  predates product support — callers then fall back to fetchProducts). */
+  products?: WpProduct[];
 }
 
 /** Fetches published pages as link targets (paginated). */
@@ -575,6 +578,7 @@ export async function fetchSyncPayload(
     pages?: Array<{ id: number; title: string; link: string }>;
     product_categories?: Array<{ id: number; name: string; link: string }>;
     product_tags?: Array<{ id: number; name: string; link: string }>;
+    products?: Array<Record<string, unknown>>;
   };
   const mapTargets = (
     arr: Array<{ id: number; title?: string; name?: string; link: string }> | undefined
@@ -587,6 +591,23 @@ export async function fetchSyncPayload(
     pages: mapTargets(d.pages),
     productCategories: mapTargets(d.product_categories),
     productTags: mapTargets(d.product_tags),
+    // Only defined when the (updated) snippet returns products server-side.
+    products: Array.isArray(d.products)
+      ? d.products.map((p) => {
+          const cats = (p.categories as number[] | undefined) ?? [];
+          return {
+            id: Number(p.id),
+            name: String(p.name ?? ""),
+            sku: String(p.sku ?? ""),
+            stock_status: String(p.stock_status ?? "instock"),
+            total_sales: Number(p.total_sales ?? 0),
+            price: String(p.price ?? ""),
+            date_created: (p.date_created as string) ?? null,
+            image_url: (p.image as string) || null,
+            category_ids: cats.map((c) => Number(c)).filter(Boolean),
+          };
+        })
+      : undefined,
   };
 }
 

@@ -76,9 +76,43 @@ function seo_dash_full_sync() {
         'tags'               => seo_dash_terms('post_tag'),
         'product_categories' => seo_dash_terms('product_cat'),
         'product_tags'       => seo_dash_terms('product_tag'),
+        'products'           => seo_dash_products(),
         'pages'              => $pages,
         'yoast'              => defined('WPSEO_VERSION'),
     ];
+}
+// WooCommerce products (server-side, one call) for idea/content generation.
+function seo_dash_products() {
+    if (!function_exists('wc_get_products')) return [];
+    $out = [];
+    $page = 1;
+    do {
+        $q = wc_get_products([
+            'status'  => 'publish',
+            'limit'   => 200,
+            'page'    => $page,
+            'orderby' => 'date',
+            'order'   => 'DESC',
+        ]);
+        if (empty($q)) break;
+        foreach ($q as $p) {
+            $dc = $p->get_date_created();
+            $out[] = [
+                'id'           => $p->get_id(),
+                'name'         => $p->get_name(),
+                'sku'          => $p->get_sku(),
+                'stock_status' => $p->get_stock_status(),
+                'total_sales'  => (int) $p->get_total_sales(),
+                'price'        => $p->get_price(),
+                'date_created' => $dc ? $dc->date('c') : null,
+                'image'        => ($p->get_image_id() ? wp_get_attachment_image_url($p->get_image_id(), 'medium') : '') ?: '',
+                'categories'   => $p->get_category_ids(),
+            ];
+        }
+        if (count($q) < 200) break;
+        $page++;
+    } while ($page <= 25);
+    return $out;
 }
 
 // --- Poll every minute via WP-Cron ---
