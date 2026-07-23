@@ -5,6 +5,7 @@ import {
   FileText,
   Lightbulb,
   LayoutDashboard,
+  Link2,
   LogOut,
   Settings,
   Plus,
@@ -21,6 +22,7 @@ import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { AddSiteWizard } from "@/components/AddSiteWizard";
 import { PostsList } from "@/components/PostsList";
 import { IdeasList } from "@/components/IdeasList";
+import { LinksPage } from "@/components/LinksPage";
 import { ProjectSettings } from "@/components/ProjectSettings";
 import { OrganicOverview } from "@/components/OrganicOverview";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -32,12 +34,13 @@ const PostEditor = lazy(() =>
 import { Button, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
-type NavKey = "overview" | "posts" | "ideas" | "settings";
+type NavKey = "overview" | "posts" | "ideas" | "links" | "settings";
 
 const NAV: { key: NavKey; label: string; icon: typeof LayoutDashboard }[] = [
   { key: "overview", label: "סקירה", icon: LayoutDashboard },
   { key: "posts", label: "פוסטים", icon: FileText },
   { key: "ideas", label: "רעיונות", icon: Lightbulb },
+  { key: "links", label: "קישורים פנימיים", icon: Link2 },
   { key: "settings", label: "הגדרות", icon: Settings },
 ];
 
@@ -45,11 +48,13 @@ const NAV_PATH: Record<NavKey, string> = {
   overview: "/",
   posts: "/posts",
   ideas: "/ideas",
+  links: "/links",
   settings: "/settings",
 };
 function pathToNav(pathname: string): NavKey {
   if (pathname.startsWith("/posts")) return "posts";
   if (pathname.startsWith("/ideas")) return "ideas";
+  if (pathname.startsWith("/links")) return "links";
   if (pathname.startsWith("/settings")) return "settings";
   return "overview";
 }
@@ -344,6 +349,7 @@ function DashboardInner() {
                 path="ideas"
                 element={<IdeasList onEditPost={(pid) => navigate(`/posts/${pid}`)} />}
               />
+              <Route path="links" element={<LinksPage />} />
               <Route path="settings" element={<ProjectSettings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

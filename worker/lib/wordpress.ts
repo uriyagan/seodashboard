@@ -52,7 +52,7 @@ function authHeader(auth: WpAuth): string {
 }
 
 // A real browser UA — hosts' anti-bot/WAF 403-challenge bot-identifying UAs.
-const BROWSER_UA =
+export const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 function siteBase(siteUrl: string): string {
@@ -662,4 +662,211 @@ export async function fetchAllPosts(
     page++;
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Internal-links feature: content fetching + single-field pushes.     */
+/* ------------------------------------------------------------------ */
+
+export interface WpContentItem {
+  id: number;
+  title: string;
+  link: string;
+  html: string;
+}
+
+export interface WpContentPage {
+  items: WpContentItem[];
+  totalPages: number;
+}
+
+/**
+ * One page of published posts/pages WITH rendered content. Content bodies are
+ * heavy, so per_page stays low (20) — the chunked refresh loop drives paging.
+ */
+export async function fetchContentPage(
+  auth: WpAuth,
+  kind: "posts" | "pages",
+  page: number,
+  runner?: CompanionRunner
+): Promise<WpContentPage> {
+  const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/${kind}`, {}, {
+    per_page: 20,
+    page,
+    status: "publish",
+    _fields: "id,title,link,content",
+  }, runner);
+  if (r.status >= 400) return { items: [], totalPages: 0 };
+  const batch = JSON.parse(r.text) as Array<{
+    id: number;
+    title: { rendered: string };
+    link: string;
+    content?: { rendered?: string };
+  }>;
+  return {
+    items: batch.map((p) => ({
+      id: p.id,
+      title: p.title?.rendered ?? "",
+      link: p.link,
+      html: p.content?.rendered ?? "",
+    })),
+    totalPages: Number(r.headers.get("X-WP-TotalPages") ?? "1"),
+  };
+}
+
+/**
+ * One page of published products WITH descriptions. The permalink comes from
+ * here — the local products table doesn't store it. Returns empty when
+ * WooCommerce is absent.
+ */
+export async function fetchProductsContentPage(
+  auth: WpAuth,
+  page: number,
+  runner?: CompanionRunner
+): Promise<WpContentPage> {
+  const r = await wpFetch(auth.siteUrl, auth, "/wc/v3/products", {}, {
+    per_page: 20,
+    page,
+    status: "publish",
+    _fields: "id,name,permalink,description,short_description",
+  }, runner);
+  if (r.status >= 400) return { items: [], totalPages: 0 }; // no WooCommerce
+  let batch: Array<Record<string, unknown>>;
+  try {
+    batch = JSON.parse(r.text);
+  } catch {
+    return { items: [], totalPages: 0 };
+  }
+  if (!Array.isArray(batch)) return { items: [], totalPages: 0 };
+  return {
+    items: batch.map((p) => ({
+      id: Number(p.id),
+      title: String(p.name ?? ""),
+      link: String(p.permalink ?? ""),
+      html: `${String(p.description ?? "")} ${String(p.short_description ?? "")}`,
+    })),
+    totalPages: Number(r.headers.get("X-WP-TotalPages") ?? "1"),
+  };
+}
+
+/** All product_cat/product_tag terms WITH descriptions (terms are few — paginated internally). */
+export async function fetchTermsWithDescription(
+  auth: WpAuth,
+  taxonomy: "product_cat" | "product_tag",
+  runner?: CompanionRunner
+): Promise<WpContentItem[]> {
+  const out: WpContentItem[] = [];
+  let page = 1;
+  for (;;) {
+    const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/${taxonomy}`, {}, {
+      per_page: 100,
+      page,
+      _fields: "id,name,link,description",
+    }, runner);
+    if (r.status >= 400) break; // taxonomy absent (no WooCommerce)
+    const batch = JSON.parse(r.text) as Array<{
+      id: number;
+      name: string;
+      link: string;
+      description?: string;
+    }>;
+    for (const t of batch) {
+      out.push({ id: t.id, title: t.name, link: t.link, html: t.description ?? "" });
+    }
+    const totalPages = Number(r.headers.get("X-WP-TotalPages") ?? "1");
+    if (page >= totalPages || batch.length === 0) break;
+    page++;
+  }
+  return out;
+}
+
+/**
+ * Fetches the RENDERED content of a single post/page — for the AI link scan
+ * (rendered text is what Gemini should read; builder shortcodes are expanded).
+ */
+export async function fetchRenderedContent(
+  auth: WpAuth,
+  kind: "post" | "page",
+  wpId: number,
+  runner?: CompanionRunner
+): Promise<string> {
+  const route = kind === "post" ? `/wp/v2/posts/${wpId}` : `/wp/v2/pages/${wpId}`;
+  const r = await wpFetch(auth.siteUrl, auth, route, {}, {
+    _fields: "content",
+  }, runner);
+  if (r.status >= 400) throw new Error(`fetch ${kind} ${wpId} failed: HTTP ${r.status}`);
+  const p = JSON.parse(r.text) as { content?: { rendered?: string } };
+  return p.content?.rendered ?? "";
+}
+
+/** Fetches the raw (edit-context) content of a post or page — for link apply. */
+export async function fetchRawContent(
+  auth: WpAuth,
+  kind: "post" | "page",
+  wpId: number,
+  runner?: CompanionRunner
+): Promise<string> {
+  const route = kind === "post" ? `/wp/v2/posts/${wpId}` : `/wp/v2/pages/${wpId}`;
+  const r = await wpFetch(auth.siteUrl, auth, route, {}, {
+    context: "edit",
+    _fields: "content",
+  }, runner);
+  if (r.status >= 400) throw new Error(`fetch ${kind} ${wpId} failed: HTTP ${r.status}`);
+  const p = JSON.parse(r.text) as { content?: { raw?: string; rendered?: string } };
+  return p.content?.raw ?? p.content?.rendered ?? "";
+}
+
+/**
+ * Updates ONLY the content field of a post/page. Deliberately not pushPost —
+ * that would overwrite Yoast meta / terms with values we don't have here.
+ */
+export async function updateContent(
+  auth: WpAuth,
+  kind: "post" | "page",
+  wpId: number,
+  html: string,
+  runner?: CompanionRunner
+): Promise<void> {
+  const route = kind === "post" ? `/wp/v2/posts/${wpId}` : `/wp/v2/pages/${wpId}`;
+  const r = await wpFetch(auth.siteUrl, auth, route, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: html }),
+  }, {}, runner);
+  if (r.status >= 400) {
+    throw new Error(`update ${kind} failed: HTTP ${r.status} ${r.text.slice(0, 200)}`);
+  }
+}
+
+/** Fetches a single product term's description (edit context). */
+export async function fetchTermDescription(
+  auth: WpAuth,
+  taxonomy: "product_cat" | "product_tag",
+  termId: number,
+  runner?: CompanionRunner
+): Promise<string> {
+  const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/${taxonomy}/${termId}`, {}, {
+    context: "edit",
+    _fields: "description",
+  }, runner);
+  if (r.status >= 400) throw new Error(`fetch term ${termId} failed: HTTP ${r.status}`);
+  return (JSON.parse(r.text) as { description?: string }).description ?? "";
+}
+
+/** Updates ONLY a product term's description. */
+export async function updateTermDescription(
+  auth: WpAuth,
+  taxonomy: "product_cat" | "product_tag",
+  termId: number,
+  description: string,
+  runner?: CompanionRunner
+): Promise<void> {
+  const r = await wpFetch(auth.siteUrl, auth, `/wp/v2/${taxonomy}/${termId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ description }),
+  }, {}, runner);
+  if (r.status >= 400) {
+    throw new Error(`update term failed: HTTP ${r.status} ${r.text.slice(0, 200)}`);
+  }
 }

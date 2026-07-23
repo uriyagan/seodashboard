@@ -5,8 +5,10 @@ import { ai } from "./routes/ai";
 import { ideas } from "./routes/ideas";
 import { companion } from "./routes/companion";
 import { gsc } from "./routes/gsc";
+import { links } from "./routes/links";
 import { requireAdmin } from "./lib/supabase";
 import { runMonitor } from "./lib/monitor";
+import { refreshAllProjectsLinks } from "./lib/linksCron";
 
 /**
  * Cloudflare Worker — API layer (Hono) + daily cron monitor.
@@ -46,6 +48,7 @@ app.route("/", ai); // Phase 4–5 — Gemini text + Nano Banana 2 images
 app.route("/", ideas); // Phase 6 — idea engine
 app.route("/", companion); // companion queue (firewalled sites)
 app.route("/", gsc); // Google Search Console OAuth + keyword data
+app.route("/", links); // internal-links inventory, broken check, AI opportunities
 
 // Manual trigger for the monitor (admins only) — same logic the cron runs.
 app.post("/api/monitor/run", async (c) => {
@@ -75,8 +78,13 @@ app.all("*", async (c) => {
 
 export default {
   fetch: app.fetch,
-  // Phase 7 — daily cadence & stuck-draft monitoring.
+  // Phase 7 — daily cadence & stuck-draft monitoring, then the internal-links
+  // inventory refresh (sequential keeps peak subrequest concurrency low).
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runMonitor(env).then(() => undefined));
+    ctx.waitUntil(
+      runMonitor(env)
+        .then(() => refreshAllProjectsLinks(env))
+        .catch(() => undefined)
+    );
   },
 };

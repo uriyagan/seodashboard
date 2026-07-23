@@ -3,7 +3,7 @@
 > מסמך זה מתעד את הארכיטקטורה של המערכת: רכיבים, זרימות נתונים והחלטות תכנון.
 > מתעדכן באופן שוטף.
 
-**עודכן לאחרונה:** 2026-07-21
+**עודכן לאחרונה:** 2026-07-23
 
 ---
 
@@ -112,6 +112,29 @@ API Route → משיכת כל כותרות הפוסטים מ-WP REST
 ```
 עריכת שדות בעורך → API Route → WP REST (mu-plugin)
   → כתיבת _yoast_wpseo_focuskw / _title / _metadesc
+```
+
+### ד. קישורים פנימיים (לשונית ייעודית)
+```
+1) מלאי קישורים (site_links):
+   לולאת צ'אנקים מה-frontend → POST /links/refresh {cursor}
+     → worker מושך עמוד תוכן (posts→pages→products→terms, per_page=20, rendered)
+     → extractLinks (regex <a href>, resolve יחסיים, פנימי/חיצוני לפי host)
+     → delete+insert פר פרויקט; בסיום links_synced_at
+   עדכון שוטף: hook בדחיפת פוסט (replaceSourceLinks) + Cron יומי (refreshAllProjectsLinks)
+
+2) בדיקת לינקים שבורים (link_checks — ידני):
+   frontend מחשב URL-ים ייחודיים → POST /links/check {urls≤15}
+     → probeUrl: פנימיים דרך ה-relay (סטטוס אמין, עוקף sgcaptcha), חיצוניים HEAD→GET
+     → רק 404/410 = broken; 403/999/timeout = error (לא שבור)
+
+3) הזדמנויות AI (link_opportunities):
+   POST /links/scan {offset} → 4 מקורות לצ'אנק (post/page/product_cat/product_tag)
+     → suggestInternalLinks (אותו מנגנון Gemini של העורך) מול קטלוג link_targets
+     → ולידציה: עוגן מילולי, יעד מוכר, יעד≠מקור, לא-כבר-מקושר; upsert עם דדופ
+   POST /links/opportunities/:oid/apply → תוכן RAW טרי מ-WP → applyAnchorLink
+     (סירוב בתוך shortcodes של builder) → updateContent/updateTermDescription בלבד
+     (לא pushPost — שומר על Yoast) → עדכון מקומי + site_links + status=applied
 ```
 
 ---

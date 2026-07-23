@@ -9,6 +9,7 @@ import {
   createTerm,
   uploadMedia,
 } from "../lib/wordpress";
+import { replaceSourceLinks } from "../lib/links";
 
 export const posts = new Hono<{ Bindings: Env }>();
 
@@ -99,6 +100,29 @@ posts.post("/api/projects/:id/posts/push", async (c) => {
       await sb.from("posts").upsert(row, { onConflict: "project_id,wp_post_id" });
     }
     await sb.from("projects").update({ last_post_at: new Date().toISOString() }).eq("id", projectId);
+
+    // Keep the internal-links inventory current for this post. Best-effort —
+    // link bookkeeping must never fail a push.
+    try {
+      const { data: localRow } = await sb
+        .from("posts")
+        .select("link")
+        .eq("project_id", projectId)
+        .eq("wp_post_id", wpId)
+        .maybeSingle();
+      await replaceSourceLinks(
+        sb,
+        projectId,
+        project.site_url,
+        "post",
+        wpId,
+        body.title,
+        (localRow?.link as string) ?? "",
+        body.content_html
+      );
+    } catch {
+      // ignore
+    }
 
     return c.json({ ok: true, wpId, status });
   } catch (e) {
