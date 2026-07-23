@@ -4,6 +4,7 @@ import { requireAdmin } from "../lib/supabase";
 import { loadProject, projectAuth } from "../lib/project";
 import {
   generateCategoryIdeas,
+  generateIdeas,
   generateArticle,
   generateImage,
   assignCategoriesToTitles,
@@ -69,20 +70,48 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
     sb.from("ideas").select("title").eq("project_id", projectId).eq("status", "suggested"),
   ]);
 
-  let eligible = eligibleCategories(products, names, 5);
+  const existingTitles = (postsRes.data ?? []).map((p: { title: string }) => p.title).filter(Boolean);
+  const pendingTitles = (pendingRes.data ?? []).map((i: { title: string }) => i.title).filter(Boolean);
+
+  const allEligible = eligibleCategories(products, names, 5);
+  let eligible = allEligible;
   if (categoryIds && categoryIds.length) {
     const wanted = new Set(categoryIds);
-    eligible = eligible.filter((cat) => wanted.has(cat.id));
+    eligible = allEligible.filter((cat) => wanted.has(cat.id));
   }
+
+  // Non-ecommerce (brochure) site — no product categories at all: fall back to
+  // general ideas from the existing content, with no category association.
+  if (!allEligible.length) {
+    try {
+      const titles = await generateIdeas(
+        c.env,
+        project.content_prompt,
+        [...existingTitles, ...pendingTitles],
+        10
+      );
+      const rows = titles
+        .filter(Boolean)
+        .map((title) => ({ project_id: projectId, title, status: "suggested" }));
+      if (!rows.length) return c.json({ ok: true, ideas: [] });
+      const { data, error } = await sb
+        .from("ideas")
+        .insert(rows)
+        .select("id, title, status, created_at, product_category_name");
+      if (error) throw error;
+      return c.json({ ok: true, ideas: data });
+    } catch (e) {
+      return c.json({ ok: false, error: e instanceof Error ? e.message : "failed" }, 500);
+    }
+  }
+
+  // Ecommerce site but the selected categories aren't eligible (e.g. out of stock).
   if (!eligible.length) {
     return c.json(
-      { ok: false, error: "אין קטגוריות מוצרים עם מספיק מוצרים במלאי. סנכרן את האתר או בחר קטגוריות אחרות." },
+      { ok: false, error: "הקטגוריות שנבחרו אינן זמינות (פחות מ-5 מוצרים במלאי). בחר קטגוריות אחרות." },
       400
     );
   }
-
-  const existingTitles = (postsRes.data ?? []).map((p: { title: string }) => p.title).filter(Boolean);
-  const pendingTitles = (pendingRes.data ?? []).map((i: { title: string }) => i.title).filter(Boolean);
 
   const catalog = eligible.map((cat) => ({
     id: cat.id,

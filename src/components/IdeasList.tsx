@@ -79,7 +79,7 @@ function CategoryModal({
           )}
           {cats && cats.length === 0 && (
             <p className="py-6 text-center text-sm text-[var(--muted)]">
-              אין קטגוריות מוצרים עם מספיק מוצרים במלאי. ודא שהאתר מסונכרן (WooCommerce).
+              לאתר זה אין קטגוריות מוצרים (אתר תדמית, או שטרם סונכרן). ניצור רעיונות כלליים על סמך התוכן הקיים.
             </p>
           )}
           {cats && cats.length > 0 && (
@@ -103,13 +103,22 @@ function CategoryModal({
         </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-[var(--border)] px-5 py-4">
-          <Button variant="ghost" onClick={() => onGenerate([])} disabled={!cats?.length}>
-            מכל הקטגוריות
-          </Button>
-          <Button onClick={() => onGenerate([...selected])} disabled={selected.size === 0}>
-            <Sparkles className="size-4" />
-            צור רעיונות ({selected.size})
-          </Button>
+          {cats && cats.length === 0 ? (
+            <Button className="w-full" onClick={() => onGenerate([])}>
+              <Sparkles className="size-4" />
+              צור רעיונות כלליים
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={() => onGenerate([])} disabled={!cats?.length}>
+                מכל הקטגוריות
+              </Button>
+              <Button onClick={() => onGenerate([...selected])} disabled={selected.size === 0}>
+                <Sparkles className="size-4" />
+                צור רעיונות ({selected.size})
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </div>
