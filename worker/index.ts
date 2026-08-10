@@ -22,6 +22,8 @@ export interface Env {
   SUPABASE_SERVICE_ROLE_KEY?: string;
   GEMINI_API_KEY?: string;
   GEMINI_TEXT_MODEL?: string;
+  /** Faster model used automatically when the primary text model hits a 524/timeout. */
+  GEMINI_TEXT_FALLBACK_MODEL?: string;
   GEMINI_IMAGE_MODEL?: string;
   RESEND_API_KEY?: string;
   RESEND_FROM?: string;

@@ -77,7 +77,8 @@ ai.post("/api/projects/:id/ai/write", async (c) => {
       catId = await pickCategoryForTitle(c.env, topic.trim(), eligible);
     }
     const categoryName = catId ? names.get(catId) ?? null : null;
-    const productNames = catId ? topProductsForCategory(products, catId, 50) : [];
+    // Cap at 20 — large catalogs inflate the prompt and push Pro past CF's ~100s limit.
+    const productNames = catId ? topProductsForCategory(products, catId, 20) : [];
 
     const article = await generateArticle(
       c.env,

@@ -2,16 +2,39 @@
  * Google Gemini client (runs in the Worker).
  * Text generation + Nano Banana 2 image generation.
  * Model IDs are overridable via env; defaults verified July 2026.
+ *
+ * Important: seo.uriyaganor.com sits behind Cloudflare's ~100s proxy
+ * timeout. Gemini 3.1 Pro defaults to thinkingLevel=HIGH, which routinely
+ * exceeds that on long Hebrew articles — surfacing as `Gemini 524`.
+ * Long text calls therefore pin thinking to LOW and fall back to Flash.
  */
 import type { Env } from "../index";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
+/** Transient upstream / proxy failures worth retrying. */
+const RETRYABLE = new Set([429, 500, 502, 503, 504, 524]);
+
 export function textModel(env: Env): string {
   return env.GEMINI_TEXT_MODEL || "gemini-3.1-pro-preview";
 }
+/** Faster model used when Pro hits a gateway timeout. */
+export function textFallbackModel(env: Env): string {
+  return env.GEMINI_TEXT_FALLBACK_MODEL || "gemini-3-flash-preview";
+}
 export function imageModel(env: Env): string {
   return env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image"; // Nano Banana 2
+}
+
+export type ThinkingLevel = "LOW" | "MEDIUM" | "HIGH";
+
+interface CallGeminiOpts {
+  /** Override model id (defaults to env text model). */
+  model?: string;
+  /** Gemini 3.x reasoning depth. Omit for image / non-thinking models. */
+  thinkingLevel?: ThinkingLevel;
+  /** Attempts including the first try. */
+  retries?: number;
 }
 
 export interface GeneratedArticle {
@@ -34,18 +57,80 @@ const ARTICLE_SCHEMA = {
   required: ["title", "content_html", "focus_keyword", "seo_title", "meta_description"],
 };
 
-async function callGemini(env: Env, model: string, body: unknown): Promise<any> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Low-level Gemini generateContent call with retries on transient failures
+ * (incl. Cloudflare 524 gateway timeouts on long Pro/thinking responses).
+ */
+async function callGemini(
+  env: Env,
+  body: Record<string, unknown>,
+  opts: CallGeminiOpts = {}
+): Promise<any> {
   if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
-  const res = await fetch(`${API_BASE}/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Gemini ${res.status}: ${detail.slice(0, 300)}`);
+  const model = opts.model || textModel(env);
+  const retries = opts.retries ?? 2;
+
+  // Merge thinkingLevel into generationConfig when requested (Gemini 3.x).
+  const payload = { ...body };
+  if (opts.thinkingLevel) {
+    const gc = (payload.generationConfig as Record<string, unknown> | undefined) ?? {};
+    payload.generationConfig = {
+      ...gc,
+      thinkingConfig: { thinkingLevel: opts.thinkingLevel },
+    };
   }
-  return res.json();
+
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await sleep(1000 * attempt);
+    const res = await fetch(`${API_BASE}/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) return res.json();
+
+    const detail = await res.text().catch(() => "");
+    const msg =
+      res.status === 524 || /error code:\s*524/i.test(detail)
+        ? `Gemini 524: הבקשה לקחה יותר מדי זמן (timeout של Cloudflare ~100ש'). נסה שוב, או החלף ל-GEMINI_TEXT_MODEL מהיר יותר.`
+        : `Gemini ${res.status}: ${detail.slice(0, 300)}`;
+    lastErr = new Error(msg);
+    if (!RETRYABLE.has(res.status) || attempt === retries) break;
+  }
+  throw lastErr ?? new Error("Gemini call failed");
+}
+
+/**
+ * Run a text generation call on the primary model; on gateway timeout,
+ * retry once on the faster Flash fallback (quality trade-off beats failure).
+ */
+async function callGeminiText(
+  env: Env,
+  body: Record<string, unknown>,
+  opts: { thinkingLevel?: ThinkingLevel; retries?: number } = {}
+): Promise<any> {
+  try {
+    return await callGemini(env, body, {
+      model: textModel(env),
+      thinkingLevel: opts.thinkingLevel ?? "LOW",
+      retries: opts.retries ?? 1,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "";
+    const timedOut = /\b524\b|timeout|DEADLINE/i.test(msg);
+    const fallback = textFallbackModel(env);
+    if (!timedOut || fallback === textModel(env)) throw e;
+    return callGemini(env, body, {
+      model: fallback,
+      thinkingLevel: "LOW",
+      retries: 1,
+    });
+  }
 }
 
 /**
@@ -180,14 +265,21 @@ export async function generateArticle(
     "כל הטקסט בעברית.",
   ].filter(Boolean).join("\n");
 
-  const data = await callGemini(env, textModel(env), {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: ARTICLE_SCHEMA,
-      temperature: 0.8,
+  // LOW thinking keeps article writes under Cloudflare's ~100s proxy limit;
+  // on 524 we automatically fall back to Flash (see callGeminiText).
+  const data = await callGeminiText(
+    env,
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: ARTICLE_SCHEMA,
+        temperature: 0.8,
+        maxOutputTokens: 8192,
+      },
     },
-  });
+    { thinkingLevel: "LOW" }
+  );
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error("Gemini returned no content");
@@ -271,15 +363,19 @@ export async function generateIdeas(
     "בשדה category_fit הסבר את ההתאמה לתחום האתר. החזר JSON: { ideas: [{ title, brief }] }.",
   ].join("\n");
 
-  const data = await callGemini(env, textModel(env), {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: BROCHURE_IDEAS_SCHEMA,
-      temperature: 0.9,
-      maxOutputTokens: 16384,
+  const data = await callGeminiText(
+    env,
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: BROCHURE_IDEAS_SCHEMA,
+        temperature: 0.9,
+        maxOutputTokens: 16384,
+      },
     },
-  });
+    { thinkingLevel: "LOW" }
+  );
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error("Gemini returned no ideas");
@@ -374,14 +470,19 @@ export async function suggestInternalLinks(
     "החזר JSON: { suggestions: [{ anchor, target_url, target_title, target_type, reason }] }. target_url חייב להיות אחד מה-URL-ים ברשימה.",
   ].join("\n");
 
-  const data = await callGemini(env, textModel(env), {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: LINK_SCHEMA,
-      temperature: 0.3,
+  const data = await callGeminiText(
+    env,
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: LINK_SCHEMA,
+        temperature: 0.3,
+        maxOutputTokens: 4096,
+      },
     },
-  });
+    { thinkingLevel: "LOW" }
+  );
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) return [];
@@ -451,15 +552,19 @@ export async function generateCategoryIdeas(
     "החזר JSON: { ideas: [{ title, category_id, brief }] }.",
   ].join("\n");
 
-  const data = await callGemini(env, textModel(env), {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: CATEGORY_IDEAS_SCHEMA,
-      temperature: 0.9,
-      maxOutputTokens: 16384,
+  const data = await callGeminiText(
+    env,
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: CATEGORY_IDEAS_SCHEMA,
+        temperature: 0.9,
+        maxOutputTokens: 16384,
+      },
     },
-  });
+    { thinkingLevel: "LOW" }
+  );
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error("Gemini לא החזיר רעיונות");
@@ -488,18 +593,23 @@ export async function pickCategoryForTitle(
     "החזר JSON: { category_id: <number> } — המזהה של הקטגוריה המתאימה ביותר בלבד.",
   ].join("\n");
 
-  const data = await callGemini(env, textModel(env), {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "object",
-        properties: { category_id: { type: "number" } },
-        required: ["category_id"],
+  const data = await callGeminiText(
+    env,
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: { category_id: { type: "number" } },
+          required: ["category_id"],
+        },
+        temperature: 0.1,
+        maxOutputTokens: 256,
       },
-      temperature: 0.1,
     },
-  });
+    { thinkingLevel: "LOW" }
+  );
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) return null;
   try {
@@ -531,27 +641,32 @@ export async function assignCategoriesToTitles(
     "החזר JSON: { assignments: [{ index, category_id }] } — לכל מאמר את category_id המתאים ביותר מהרשימה.",
   ].join("\n");
 
-  const data = await callGemini(env, textModel(env), {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "object",
-        properties: {
-          assignments: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { index: { type: "number" }, category_id: { type: "number" } },
-              required: ["index", "category_id"],
+  const data = await callGeminiText(
+    env,
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            assignments: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { index: { type: "number" }, category_id: { type: "number" } },
+                required: ["index", "category_id"],
+              },
             },
           },
+          required: ["assignments"],
         },
-        required: ["assignments"],
+        temperature: 0.1,
+        maxOutputTokens: 4096,
       },
-      temperature: 0.1,
     },
-  });
+    { thinkingLevel: "LOW" }
+  );
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   const out: (number | null)[] = titles.map(() => null);
   if (!text) return out;
@@ -604,10 +719,15 @@ export async function generateImage(
     parts.push({ inlineData: { mimeType: r.mimeType || "image/png", data: r.base64 } });
   }
 
-  const data = await callGemini(env, imageModel(env), {
-    contents: [{ parts }],
-    generationConfig: { responseModalities: ["IMAGE"] },
-  });
+  // Image models don't use thinkingConfig — call the raw helper directly.
+  const data = await callGemini(
+    env,
+    {
+      contents: [{ parts }],
+      generationConfig: { responseModalities: ["IMAGE"] },
+    },
+    { model: imageModel(env), retries: 1 }
+  );
 
   const respParts = data?.candidates?.[0]?.content?.parts ?? [];
   for (const part of respParts) {

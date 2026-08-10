@@ -20,9 +20,21 @@ export async function api<T = unknown>(
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  const json = (await res.json().catch(() => ({}))) as T & { error?: string };
+  const raw = await res.text().catch(() => "");
+  let json = {} as T & { error?: string };
+  try {
+    json = raw ? (JSON.parse(raw) as T & { error?: string }) : ({} as T & { error?: string });
+  } catch {
+    /* non-JSON body (e.g. Cloudflare 524 plain text) */
+  }
   if (!res.ok) {
-    throw new Error((json as { error?: string }).error || `HTTP ${res.status}`);
+    if (json.error) throw new Error(json.error);
+    if (res.status === 524 || /error code:\s*524/i.test(raw)) {
+      throw new Error(
+        "הבקשה לקחה יותר מדי זמן (Cloudflare 524). נסה שוב — יצירת פוסט ארוכה עם Gemini Pro עלולה לעבור את מגבלת ה-~100 שניות."
+      );
+    }
+    throw new Error(`HTTP ${res.status}`);
   }
   return json as T;
 }

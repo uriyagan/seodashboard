@@ -293,7 +293,9 @@ ideas.post("/api/projects/:id/ideas/:ideaId/write", async (c) => {
 
   try {
     // 1. Article — written around the idea's full content brief (when present)
-    //    plus its product category & products.
+    //    plus its product category & products. Cap product list so the prompt
+    //    stays compact (long catalogs + Pro thinking were a common 524 cause).
+    const productNames = ((idea.product_names as string[]) ?? []).slice(0, 20);
     const article = await generateArticle(
       c.env,
       project.content_prompt,
@@ -301,29 +303,13 @@ ideas.post("/api/projects/:id/ideas/:ideaId/write", async (c) => {
       project.keywords,
       {
         categoryName: idea.product_category_name ?? undefined,
-        productNames: (idea.product_names as string[]) ?? [],
+        productNames,
         brief: (idea.brief as IdeaBrief | null) ?? undefined,
       }
     );
 
-    // 2. Featured image (best-effort).
-    let featuredUrl: string | null = null;
-    let featuredMedia: number | null = null;
-    try {
-      const img = await generateImage(c.env, project.image_prompt, `תמונה ראשית לפוסט: ${article.title}`);
-      const auth = await projectAuth(c.env, project);
-      const bin = atob(img.base64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const ext = img.mimeType.includes("jpeg") ? "jpg" : "png";
-      const media = await uploadMedia(auth, bytes, `ai-${Date.now()}.${ext}`, img.mimeType);
-      featuredUrl = media.url;
-      featuredMedia = media.id;
-    } catch {
-      /* image generation optional */
-    }
-
-    // 3. Create local draft post (carry the category association forward).
+    // 2. Create the draft immediately so a slow featured-image call can't
+    //    push the whole request past Cloudflare's ~100s proxy timeout.
     const { data: post, error } = await sb
       .from("posts")
       .insert({
@@ -333,7 +319,7 @@ ideas.post("/api/projects/:id/ideas/:ideaId/write", async (c) => {
         focus_keyword: article.focus_keyword,
         seo_title: article.seo_title,
         meta_description: article.meta_description,
-        featured_image_url: featuredUrl,
+        featured_image_url: null,
         source: "idea",
         local_status: "editing",
         wp_status: "draft",
@@ -347,7 +333,38 @@ ideas.post("/api/projects/:id/ideas/:ideaId/write", async (c) => {
 
     await sb.from("ideas").update({ status: "written", post_id: post!.id }).eq("id", ideaId);
 
-    return c.json({ ok: true, postId: post!.id, featuredUrl, featuredMedia });
+    // 3. Featured image in the background (best-effort). waitUntil keeps the
+    //    work alive briefly after we return the post to the client.
+    const postId = post!.id;
+    const env = c.env;
+    c.executionCtx.waitUntil(
+      (async () => {
+        try {
+          const img = await generateImage(env, project.image_prompt, `תמונה ראשית לפוסט: ${article.title}`);
+          const auth = await projectAuth(env, project);
+          const bin = atob(img.base64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const ext = img.mimeType.includes("jpeg") ? "jpg" : "png";
+          const media = await uploadMedia(auth, bytes, `ai-${Date.now()}.${ext}`, img.mimeType);
+          await sb
+            .from("posts")
+            .update({ featured_image_url: media.url })
+            .eq("id", postId);
+          await sb.from("post_images").insert({
+            project_id: projectId,
+            role: "featured",
+            prompt: `תמונה ראשית לפוסט: ${article.title}`,
+            wp_media_id: media.id,
+            wp_url: media.url,
+          });
+        } catch {
+          /* image generation optional */
+        }
+      })()
+    );
+
+    return c.json({ ok: true, postId, featuredUrl: null, featuredMedia: null });
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : "failed" }, 500);
   }
