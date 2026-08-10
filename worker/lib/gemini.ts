@@ -3,10 +3,11 @@
  * Text generation + Nano Banana 2 image generation.
  * Model IDs are overridable via env; defaults verified July 2026.
  *
- * Important: seo.uriyaganor.com sits behind Cloudflare's ~100s proxy
- * timeout. Gemini 3.1 Pro defaults to thinkingLevel=HIGH, which routinely
- * exceeds that on long Hebrew articles — surfacing as `Gemini 524`.
- * Long text calls therefore pin thinking to LOW and fall back to Flash.
+ * Quality-first: primary text model stays gemini-3.1-pro-preview.
+ * Cloudflare's ~100s proxy timeout means unrestricted HIGH thinking on long
+ * Hebrew articles surfaces as `Gemini 524`. We therefore cap thinking on
+ * Pro (MEDIUM for writing/ideas, LOW for light tasks) and only fall back to
+ * gemini-3-flash-preview after a timeout — never as the default.
  */
 import type { Env } from "../index";
 
@@ -97,7 +98,7 @@ async function callGemini(
     const detail = await res.text().catch(() => "");
     const msg =
       res.status === 524 || /error code:\s*524/i.test(detail)
-        ? `Gemini 524: הבקשה לקחה יותר מדי זמן (timeout של Cloudflare ~100ש'). נסה שוב, או החלף ל-GEMINI_TEXT_MODEL מהיר יותר.`
+        ? `Gemini 524: הבקשה לקחה יותר מדי זמן (timeout של Cloudflare ~100ש'). המערכת תנסה שוב / תעבור אוטומטית למודל גיבוי.`
         : `Gemini ${res.status}: ${detail.slice(0, 300)}`;
     lastErr = new Error(msg);
     if (!RETRYABLE.has(res.status) || attempt === retries) break;
@@ -265,8 +266,8 @@ export async function generateArticle(
     "כל הטקסט בעברית.",
   ].filter(Boolean).join("\n");
 
-  // LOW thinking keeps article writes under Cloudflare's ~100s proxy limit;
-  // on 524 we automatically fall back to Flash (see callGeminiText).
+  // MEDIUM = best quality that still usually clears Cloudflare's ~100s limit.
+  // On 524, callGeminiText retries then falls back to Flash once.
   const data = await callGeminiText(
     env,
     {
@@ -275,10 +276,10 @@ export async function generateArticle(
         responseMimeType: "application/json",
         responseSchema: ARTICLE_SCHEMA,
         temperature: 0.8,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 12288,
       },
     },
-    { thinkingLevel: "LOW" }
+    { thinkingLevel: "MEDIUM" }
   );
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -374,7 +375,7 @@ export async function generateIdeas(
         maxOutputTokens: 16384,
       },
     },
-    { thinkingLevel: "LOW" }
+    { thinkingLevel: "MEDIUM" }
   );
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -563,7 +564,7 @@ export async function generateCategoryIdeas(
         maxOutputTokens: 16384,
       },
     },
-    { thinkingLevel: "LOW" }
+    { thinkingLevel: "MEDIUM" }
   );
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
