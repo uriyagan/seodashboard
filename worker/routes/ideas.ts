@@ -103,9 +103,9 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
   const project = await loadProject(sb, projectId);
   if (!project) return c.json({ error: "project not found" }, 404);
 
-  const { categoryIds } = await c.req
-    .json<{ categoryIds?: number[] }>()
-    .catch(() => ({ categoryIds: undefined }));
+  const { categoryIds, general } = await c.req
+    .json<{ categoryIds?: number[]; general?: boolean }>()
+    .catch(() => ({ categoryIds: undefined, general: false }));
 
   const [products, names, postsRes, ideasRes, gscQueries] = await Promise.all([
     loadProducts(sb, projectId),
@@ -132,6 +132,7 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
     gscQueries,
     existingPosts: (postsRes.data ?? []).filter((p: { title: string }) => p.title),
     allIdeaTitles: (ideasRes.data ?? []).map((i: { title: string }) => i.title).filter(Boolean),
+    keywords: project.keywords ?? [],
   };
   const evidence: IdeaBrief["seo_evidence_type"] = gscQueries ? "external-data" : "qualitative-estimate";
   const withEvidence = (brief: Omit<IdeaBrief, "seo_evidence_type">): IdeaBrief => ({
@@ -146,9 +147,9 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
     eligible = allEligible.filter((cat) => wanted.has(cat.id));
   }
 
-  // Non-ecommerce (brochure) site — no product categories at all: fall back to
-  // general ideas from the existing content, with no category association.
-  if (!allEligible.length) {
+  // Service / brochure ideas: skip product categories even when the shop has them.
+  // Also used when the site has no eligible product categories.
+  if (general || !allEligible.length) {
     try {
       const suggestions = await generateIdeas(
         c.env,

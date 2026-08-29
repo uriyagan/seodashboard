@@ -61,7 +61,9 @@ interface Category {
   count: number;
 }
 
-/** Modal to pick which product categories to generate ideas for (spec §1.6). */
+type GenerateOpts = { general?: boolean; categoryIds?: number[] };
+
+/** Modal: service/keyword ideas, or optional product-category ideas for shops. */
 function CategoryModal({
   projectId,
   onClose,
@@ -69,7 +71,7 @@ function CategoryModal({
 }: {
   projectId: string;
   onClose: () => void;
-  onGenerate: (categoryIds: number[]) => void;
+  onGenerate: (opts: GenerateOpts) => void;
 }) {
   const [cats, setCats] = useState<Category[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -99,7 +101,7 @@ function CategoryModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-          <h2 className="text-lg font-bold text-[var(--text)]">בחירת קטגוריות מוצרים</h2>
+          <h2 className="text-lg font-bold text-[var(--text)]">איך ליצור רעיונות</h2>
           <button
             onClick={onClose}
             className="flex size-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)]"
@@ -111,8 +113,12 @@ function CategoryModal({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <p className="mb-3 text-sm text-[var(--muted)]">
-            בחר קטגוריות שעבורן לקבל רעיונות, או המשך מכל הקטגוריות. מוצגות רק קטגוריות עם 5+ מוצרים במלאי.
+            אפשר ליצור רעיונות לבלוג על השירות שאתה מציע, לפי מילות המפתח של הפרויקט. קטגוריות מוצרים בחנות הן אופציונליות.
           </p>
+          <Button className="mb-5 w-full" onClick={() => onGenerate({ general: true })}>
+            <Sparkles className="size-4" />
+            לפי השירות ומילות המפתח
+          </Button>
           {error && <Alert>{error}</Alert>}
           {!cats && !error && (
             <div className="flex justify-center py-8">
@@ -120,48 +126,50 @@ function CategoryModal({
             </div>
           )}
           {cats && cats.length === 0 && (
-            <p className="py-6 text-center text-sm text-[var(--muted)]">
-              לאתר זה אין קטגוריות מוצרים (אתר תדמית, או שטרם סונכרן). ניצור רעיונות כלליים על סמך התוכן הקיים.
+            <p className="text-sm text-[var(--muted)]">
+              לאתר זה אין קטגוריות מוצרים עם מספיק מלאי. הרעיונות יתבססו על השירות ועל מילות המפתח.
             </p>
           )}
           {cats && cats.length > 0 && (
-            <ul className="space-y-1.5">
-              {cats.map((cat) => (
-                <li key={cat.id}>
-                  <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-[var(--border)] p-2.5 transition-colors hover:bg-[var(--surface-2)]">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(cat.id)}
-                      onChange={() => toggle(cat.id)}
-                      className="size-4 accent-[var(--brand)]"
-                    />
-                    <span className="flex-1 text-sm text-[var(--text)]">{cat.name}</span>
-                    <span className="text-xs text-[var(--muted)]">{cat.count} מוצרים</span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between gap-2 border-t border-[var(--border)] px-5 py-4">
-          {cats && cats.length === 0 ? (
-            <Button className="w-full" onClick={() => onGenerate([])}>
-              <Sparkles className="size-4" />
-              צור רעיונות כלליים
-            </Button>
-          ) : (
             <>
-              <Button variant="ghost" onClick={() => onGenerate([])} disabled={!cats?.length}>
-                מכל הקטגוריות
-              </Button>
-              <Button onClick={() => onGenerate([...selected])} disabled={selected.size === 0}>
-                <Sparkles className="size-4" />
-                צור רעיונות ({selected.size})
-              </Button>
+              <p className="mb-2 text-sm font-medium text-[var(--text)]">או לפי קטגוריות מוצרים בחנות</p>
+              <p className="mb-3 text-sm text-[var(--muted)]">
+                בחר קטגוריות שעבורן לקבל רעיונות שתומכים במוצרים במלאי. מוצגות רק קטגוריות עם 5+ מוצרים.
+              </p>
+              <ul className="space-y-1.5">
+                {cats.map((cat) => (
+                  <li key={cat.id}>
+                    <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-[var(--border)] p-2.5 transition-colors hover:bg-[var(--surface-2)]">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(cat.id)}
+                        onChange={() => toggle(cat.id)}
+                        className="size-4 accent-[var(--brand)]"
+                      />
+                      <span className="flex-1 text-sm text-[var(--text)]">{cat.name}</span>
+                      <span className="text-xs text-[var(--muted)]">{cat.count} מוצרים</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
             </>
           )}
         </div>
+
+        {cats && cats.length > 0 && (
+          <div className="flex items-center justify-between gap-2 border-t border-[var(--border)] px-5 py-4">
+            <Button variant="ghost" onClick={() => onGenerate({ categoryIds: [] })}>
+              מכל הקטגוריות
+            </Button>
+            <Button
+              onClick={() => onGenerate({ categoryIds: [...selected] })}
+              disabled={selected.size === 0}
+            >
+              <Sparkles className="size-4" />
+              צור רעיונות ({selected.size})
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -270,7 +278,9 @@ function IdeaCard({
           )}
           <Detail label="קהל יעד">{b.target_audience}</Detail>
           <Detail label="ערך מעשי לקורא">{b.reader_value}</Detail>
-          <Detail label="התאמה לקטגוריה">{b.category_fit}</Detail>
+          <Detail label={idea.product_category_name ? "התאמה לקטגוריה" : "התאמה לאתר"}>
+            {b.category_fit}
+          </Detail>
           <Detail label="שלב במסע הלקוח">{JOURNEY_LABEL[b.journey_stage] ?? b.journey_stage}</Detail>
           {b.secondary_keywords.length > 0 && (
             <div>
@@ -323,7 +333,7 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
     void load();
   }, [load]);
 
-  async function generate(categoryIds: number[]) {
+  async function generate(opts: GenerateOpts) {
     if (!activeProject) return;
     setModalOpen(false);
     setGenerating(true);
@@ -331,7 +341,7 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
     try {
       const r = await api<{ ok: boolean; error?: string }>(
         `/api/projects/${activeProject.id}/ideas/generate`,
-        { categoryIds }
+        opts
       );
       if (!r.ok) throw new Error(r.error || "יצירת רעיונות נכשלה");
       await load();
@@ -373,7 +383,7 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
         <div>
           <h1 className="text-2xl font-bold text-[var(--text)]">רעיונות לפוסטים</h1>
           <p className="text-sm text-[var(--muted)]">
-            מחקר SEO קצר (נתוני חיפוש כשזמינים) + בריף מפורט לכל רעיון, לפי קטגוריות המוצרים והמלאי
+            מחקר SEO קצר (נתוני חיפוש כשזמינים) + בריף מפורט. אפשר לפי השירות ומילות המפתח, או לפי קטגוריות מוצרים בחנות
           </p>
         </div>
         <Button className="shrink-0" onClick={() => setModalOpen(true)} loading={generating}>
@@ -392,7 +402,7 @@ export function IdeasList({ onEditPost }: { onEditPost: (postId: string) => void
         <Card className="flex flex-col items-center gap-2 py-16 text-center">
           <Lightbulb className="size-8 text-[var(--muted)]" />
           <p className="text-sm text-[var(--muted)]">
-            אין רעיונות כרגע. לחץ על "הצע לי רעיונות חדשים" כדי לקבל רעיונות מבוססי-קטגוריה.
+            אין רעיונות כרגע. לחץ על "הצע לי רעיונות חדשים" כדי לקבל רעיונות לפי השירות או לפי קטגוריות.
           </p>
         </Card>
       ) : (

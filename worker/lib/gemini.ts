@@ -223,11 +223,13 @@ const JOURNEY_LABEL: Record<ContentLanguage, Record<string, string>> = {
 
 /** Real search data + content inventory assembled before idea generation (spec §4). */
 export interface IdeaResearch {
-  /** Search Console query rows — undefined when no GSC data is available. */
+  /** Search Console query rows - undefined when no GSC data is available. */
   gscQueries?: { query: string; clicks: number; impressions: number; position: number }[];
   existingPosts: { title: string; focus_keyword?: string | null }[];
-  /** Titles of ALL ideas ever suggested (any status) — for dedup. */
+  /** Titles of ALL ideas ever suggested (any status) - for dedup. */
   allIdeaTitles: string[];
+  /** Project target keywords. Used for service-led ideas, not only shop categories. */
+  keywords?: string[];
 }
 
 export interface ArticleContext {
@@ -540,8 +542,19 @@ function researchBlocks(research: IdeaResearch, lang: ContentLanguage): string[]
           : "**אסור להמציא נפחי חיפוש, מספרים או נתונים כמותיים.** נמק במילים בלבד.",
       ];
   const none = en ? "(none)" : "(אין)";
+  const kws = (research.keywords ?? []).map((k) => k.trim()).filter(Boolean);
+  const keywordBlock = kws.length
+    ? [
+        "",
+        en
+          ? "Target search keywords for this business (prefer these as primary_keyword when they fit, and cover distinct themes from the list):"
+          : "מילות המפתח שהעסק רוצה לדרג עליהן (העדף אותן כ-primary_keyword כשהן מתאימות, וכסה נושאים שונים מהרשימה):",
+        kws.map((k) => `- ${k}`).join("\n"),
+      ]
+    : [];
   return [
     ...seoBlock,
+    ...keywordBlock,
     "",
     en
       ? "Articles already on the site (title · primary keyword):"
@@ -606,11 +619,11 @@ export async function generateIdeas(
     ...researchBlocks(research, lang),
     "",
     en
-      ? `Produce ${count} new, high-quality post ideas relevant to the site's field. ${BRIEF_INSTRUCTION.en}`
-      : `הפק ${count} רעיונות לפוסטים חדשים ואיכותיים הרלוונטיים לתחום האתר. ${BRIEF_INSTRUCTION.he}`,
+      ? `Produce ${count} new, high-quality post ideas about the service or offering of the site (how-tos, comparisons, alternatives, problems you solve). Do not require a shop product category. ${BRIEF_INSTRUCTION.en}`
+      : `הפק ${count} רעיונות לפוסטים חדשים ואיכותיים על השירות או המוצר שהאתר מציע (מדריכים, השוואות, חלופות, בעיות שאתם פותרים). אין צורך לשייך לקטגוריית מוצר בחנות. ${BRIEF_INSTRUCTION.he}`,
     en
-      ? "In category_fit explain how the idea fits the site. Return JSON: { ideas: [{ title, brief }] }."
-      : "בשדה category_fit הסבר את ההתאמה לתחום האתר. החזר JSON: { ideas: [{ title, brief }] }.",
+      ? "In category_fit explain how the idea fits the site and its service. Return JSON: { ideas: [{ title, brief }] }."
+      : "בשדה category_fit הסבר את ההתאמה לאתר ולשירות שהוא מציע. החזר JSON: { ideas: [{ title, brief }] }.",
   ].join("\n");
 
   const data = await callGeminiText(
