@@ -8,8 +8,12 @@
  * Hebrew articles surfaces as `Gemini 524`. We therefore cap thinking on
  * Pro (MEDIUM for writing/ideas, LOW for light tasks) and only fall back to
  * gemini-3-flash-preview after a timeout — never as the default.
+ *
+ * Article writing is split: free-form HTML body (+ continuation on MAX_TOKENS)
+ * then a tiny SEO-metadata JSON call. Length is owned by content_prompt only.
  */
 import type { Env } from "../index";
+import { type ContentLanguage } from "./contentLanguage";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -46,20 +50,40 @@ export interface GeneratedArticle {
   meta_description: string;
 }
 
-const ARTICLE_SCHEMA = {
+/** Small metadata blob only — never put the long article body in JSON (truncation → broken parse). */
+const SEO_META_SCHEMA = {
   type: "object",
   properties: {
     title: { type: "string" },
-    content_html: { type: "string" },
     focus_keyword: { type: "string" },
     seo_title: { type: "string" },
     meta_description: { type: "string" },
   },
-  required: ["title", "content_html", "focus_keyword", "seo_title", "meta_description"],
+  required: ["title", "focus_keyword", "seo_title", "meta_description"],
 };
+
+const MAX_ARTICLE_CONTINUATIONS = 3;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Pull visible text from a Gemini candidate (skip thought/reasoning parts). */
+function extractCandidateText(data: any): string {
+  const parts = data?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return "";
+  return parts
+    .filter((p: any) => typeof p?.text === "string" && !p.thought)
+    .map((p: any) => p.text as string)
+    .join("");
+}
+
+function finishReason(data: any): string {
+  return String(data?.candidates?.[0]?.finishReason ?? "");
+}
+
+function isTruncatedResponse(data: any): boolean {
+  return /MAX_TOKENS/i.test(finishReason(data));
 }
 
 /**
@@ -182,11 +206,19 @@ const IDEA_BRIEF_SCHEMA = {
   ],
 };
 
-const JOURNEY_LABEL: Record<string, string> = {
-  discovery: "גילוי",
-  comparison: "השוואה",
-  decision: "החלטה",
-  "post-purchase": "לאחר רכישה",
+const JOURNEY_LABEL: Record<ContentLanguage, Record<string, string>> = {
+  he: {
+    discovery: "גילוי",
+    comparison: "השוואה",
+    decision: "החלטה",
+    "post-purchase": "לאחר רכישה",
+  },
+  en: {
+    discovery: "discovery",
+    comparison: "comparison",
+    decision: "decision",
+    "post-purchase": "post-purchase",
+  },
 };
 
 /** Real search data + content inventory assembled before idea generation (spec §4). */
@@ -202,13 +234,262 @@ export interface ArticleContext {
   categoryName?: string;
   productNames?: string[];
   brief?: IdeaBrief;
+  language?: ContentLanguage;
+}
+
+function langOf(value: ContentLanguage | undefined): ContentLanguage {
+  return value === "en" ? "en" : "he";
+}
+
+/** Strip accidental markdown fences around HTML bodies. */
+function cleanArticleHtml(raw: string): string {
+  let html = raw.trim();
+  html = html.replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  return html;
+}
+
+function buildArticleContextBlocks(
+  systemPrompt: string,
+  topic: string,
+  keywords: string[],
+  context: ArticleContext
+): string[] {
+  const lang = langOf(context.language);
+  const en = lang === "en";
+  const keywordLine =
+    keywords.length > 0
+      ? en
+        ? `Business search keywords: ${keywords.join(", ")}. Pick the best match for this post as the focus_keyword (or phrase a better one if none is exact), and build the post around it.`
+        : `מילות המפתח (ביטויי חיפוש) של העסק: ${keywords.join(", ")}. בחר את המתאימה ביותר לנושא הפוסט כ-focus_keyword (או נסח מתאימה אם אף אחת אינה מדויקת), ובנה את הפוסט סביבה.`
+      : "";
+  const categoryBlock = context.categoryName
+    ? [
+        "",
+        en
+          ? "This article is written for an ecommerce store."
+          : "המאמר נכתב עבור אתר מסחר אלקטרוני (חנות).",
+        en
+          ? `Product category this article belongs to: ${context.categoryName}`
+          : `קטגוריית המוצרים שאליה המאמר משויך: ${context.categoryName}`,
+        context.productNames && context.productNames.length
+          ? en
+            ? `Top relevant products in the category (mention them naturally in the copy, without hard selling): ${context.productNames.join(", ")}`
+            : `מוצרים מובילים ורלוונטיים בקטגוריה (התייחס אליהם באופן טבעי בתוכן, בלי לפרסם באגרסיביות): ${context.productNames.join(", ")}`
+          : "",
+        en
+          ? "Take the category and products into account so the content stays relevant to what the store sells, not generic."
+          : "יש להביא בחשבון את הקטגוריה ואת המוצרים כדי שהתוכן יהיה רלוונטי למוצרים הנמכרים באתר ולא גנרי.",
+      ].filter(Boolean)
+    : [];
+  const b = context.brief;
+  const briefBlock = b
+    ? [
+        "",
+        en
+          ? "Content brief - write the article following this direction:"
+          : "בריף תוכן (Content Brief) - כתוב את המאמר לפי ההכוונה הזו:",
+        en ? `Summary: ${b.summary}` : `תקציר: ${b.summary}`,
+        en ? `Central angle: ${b.angle}` : `זווית מרכזית: ${b.angle}`,
+        b.main_topics.length
+          ? en
+            ? `Main topics to cover: ${b.main_topics.join(" | ")}`
+            : `נושאים מרכזיים לכיסוי: ${b.main_topics.join(" | ")}`
+          : "",
+        b.deep_dive_points.length
+          ? en
+            ? `Points to go deeper on: ${b.deep_dive_points.join(" | ")}`
+            : `נקודות להעמקה: ${b.deep_dive_points.join(" | ")}`
+          : "",
+        en ? `Target audience: ${b.target_audience}` : `קהל יעד: ${b.target_audience}`,
+        en ? `Search intent: ${b.search_intent}` : `כוונת חיפוש: ${b.search_intent}`,
+        en
+          ? `Practical value for the reader: ${b.reader_value}`
+          : `ערך מעשי לקורא: ${b.reader_value}`,
+        en
+          ? `Primary keyword: ${b.primary_keyword} - weave it naturally into subheadings and the opening.`
+          : `מילת מפתח ראשית: ${b.primary_keyword} - שילב אותה באופן טבעי בכותרות המשנה ובפתיח.`,
+        b.secondary_keywords.length
+          ? en
+            ? `Secondary keywords and questions to weave in naturally: ${b.secondary_keywords.join(", ")}`
+            : `מילות מפתח משניות ושאלות לשילוב טבעי: ${b.secondary_keywords.join(", ")}`
+          : "",
+        en
+          ? `Customer-journey stage: ${JOURNEY_LABEL.en[b.journey_stage] ?? b.journey_stage}`
+          : `שלב במסע הלקוח: ${JOURNEY_LABEL.he[b.journey_stage] ?? b.journey_stage}`,
+        en
+          ? "Follow the brief's direction - topics, angle, intent, and keywords - but write a flowing, natural article. Do not copy the brief wording verbatim and do not turn it into a mechanical bullet list."
+          : "עקוב אחרי הכיוון של הבריף - הנושאים, הזווית, הכוונה והמילים - אבל כתוב מאמר זורם וטבעי. אל תעתיק את ניסוחי הבריף מילה במילה ואל תהפוך אותו לרשימת סעיפים מכנית.",
+      ].filter(Boolean)
+    : [];
+  return [
+    systemPrompt?.trim() ||
+      (en
+        ? "Write a high-quality, professional, SEO-optimized blog article in English."
+        : "כתוב מאמר בלוג איכותי, מקצועי ומותאם SEO בעברית."),
+    ...categoryBlock,
+    ...briefBlock,
+    "",
+    en ? `Post topic: ${topic}` : `נושא הפוסט: ${topic}`,
+    // When a brief exists its primary_keyword takes precedence over the generic list.
+    b ? "" : keywordLine,
+  ].filter(Boolean);
 }
 
 /**
- * Generates a full blog article as structured JSON.
- * `systemPrompt` is the project's editable content_prompt. When `context`
- * carries a product category + products, the article is written around them
- * so it stays relevant to the store's catalog (spec §2.4) instead of generic.
+ * Writes the article body as free-form HTML (not JSON). If Gemini hits
+ * MAX_TOKENS mid-article, continues in a multi-turn loop — so length stays
+ * governed only by the project's content_prompt, not by a system cap.
+ */
+async function generateArticleHtml(
+  env: Env,
+  contextBlocks: string[],
+  lang: ContentLanguage
+): Promise<string> {
+  const en = lang === "en";
+  const writePrompt = [
+    ...contextBlocks,
+    "",
+    en
+      ? "Now write the article body only as clean HTML using <h2>/<h3>/<p>/<ul>/<ol>/<li> (no <html>/<body>, no markdown, no JSON)."
+      : "כתוב עכשיו את גוף המאמר בלבד כ-HTML נקי עם <h2>/<h3>/<p>/<ul>/<ol>/<li> (בלי <html>/<body>, בלי markdown, בלי JSON).",
+    en
+      ? "Start directly with an HTML tag. Article length is set only by the instructions above. Do not cut it shorter than what those instructions require."
+      : "התחל ישירות בתג HTML. אורך המאמר נקבע לפי ההוראות למעלה בלבד. אל תקצר אותו מעבר למה שנדרש שם.",
+    en ? "All article text must be in English." : "כל הטקסט בעברית.",
+  ].join("\n");
+
+  type Content = { role: string; parts: { text: string }[] };
+  const contents: Content[] = [{ role: "user", parts: [{ text: writePrompt }] }];
+  let html = "";
+
+  for (let i = 0; i <= MAX_ARTICLE_CONTINUATIONS; i++) {
+    const data = await callGeminiText(
+      env,
+      {
+        contents,
+        generationConfig: {
+          temperature: 0.8,
+          maxOutputTokens: 32768,
+        },
+      },
+      // First pass: quality. Continuations: faster, less thinking overhead.
+      { thinkingLevel: i === 0 ? "MEDIUM" : "LOW", retries: 1 }
+    );
+
+    const chunk = extractCandidateText(data);
+    if (!chunk?.trim()) {
+      if (html) break;
+      throw new Error("Gemini returned no content");
+    }
+
+    html += i === 0 ? chunk : chunk;
+    contents.push({ role: "model", parts: [{ text: chunk }] });
+
+    if (!isTruncatedResponse(data)) break;
+    if (i === MAX_ARTICLE_CONTINUATIONS) break;
+
+    contents.push({
+      role: "user",
+      parts: [
+        {
+          text: en
+            ? "Continue the article exactly from the stopping point. Return only the rest of the HTML. Do not repeat what was already written, no JSON, no explanations."
+            : "המשך את המאמר בדיוק מנקודת העצירה. החזר רק את המשך ה-HTML. בלי לחזור על מה שכבר נכתב, בלי JSON, בלי הסברים.",
+        },
+      ],
+    });
+  }
+
+  const cleaned = cleanArticleHtml(html);
+  if (cleaned.length < 80) throw new Error("Gemini החזיר גוף מאמר ריק מדי");
+  return cleaned;
+}
+
+/** Short structured SEO fields derived from the finished HTML (tiny JSON — safe). */
+async function generateArticleSeoMeta(
+  env: Env,
+  topic: string,
+  contentHtml: string,
+  brief?: IdeaBrief,
+  lang: ContentLanguage = "he"
+): Promise<Omit<GeneratedArticle, "content_html">> {
+  const en = lang === "en";
+  // Cap context sent to meta call. Full article can be long. Head+tail is enough for SEO fields.
+  const plain = contentHtml
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const excerpt =
+    plain.length <= 6000 ? plain : `${plain.slice(0, 3500)}\n…\n${plain.slice(-2000)}`;
+
+  const prompt = [
+    en
+      ? "Based on the article below, return SEO metadata in English."
+      : "על בסיס המאמר הבא, החזר מטא-דאטה SEO בעברית.",
+    en ? `Original topic: ${topic}` : `נושא מקורי: ${topic}`,
+    brief?.primary_keyword
+      ? en
+        ? `Preferred keyword from the brief (use it as focus_keyword unless it does not fit): ${brief.primary_keyword}`
+        : `מילת מפתח מועדפת מהבריף (השתמש בה כ-focus_keyword אלא אם אינה מתאימה): ${brief.primary_keyword}`
+      : "",
+    "",
+    en ? "Article content (plain text):" : "תוכן המאמר (טקסט):",
+    excerpt,
+    "",
+    en
+      ? "Return JSON: title (article title), focus_keyword, seo_title (up to ~60 characters), meta_description (up to ~155 characters)."
+      : "החזר JSON: title (כותרת המאמר), focus_keyword, seo_title (עד ~60 תווים), meta_description (עד ~155 תווים).",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const data = await callGeminiText(
+    env,
+    {
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: SEO_META_SCHEMA,
+        temperature: 0.4,
+        maxOutputTokens: 2048,
+      },
+    },
+    { thinkingLevel: "LOW", retries: 1 }
+  );
+
+  const text = extractCandidateText(data);
+  if (!text) throw new Error("Gemini לא החזיר מטא-דאטה לפוסט");
+  try {
+    const meta = JSON.parse(text) as Omit<GeneratedArticle, "content_html">;
+    if (!meta.title?.trim()) meta.title = topic;
+    if (!meta.focus_keyword?.trim()) {
+      meta.focus_keyword = brief?.primary_keyword?.trim() || topic;
+    }
+    if (!meta.seo_title?.trim()) meta.seo_title = meta.title.slice(0, 60);
+    if (!meta.meta_description?.trim()) {
+      meta.meta_description = plain.slice(0, 155);
+    }
+    return meta;
+  } catch {
+    // Meta is optional-ish — never fail a good article on a tiny JSON glitch.
+    return {
+      title: topic,
+      focus_keyword: brief?.primary_keyword?.trim() || topic,
+      seo_title: topic.slice(0, 60),
+      meta_description: plain.slice(0, 155),
+    };
+  }
+}
+
+/**
+ * Generates a full blog article.
+ * `systemPrompt` is the project's editable content_prompt (including length).
+ * When `context` carries a product category + products, the article is written
+ * around them so it stays catalog-relevant (spec §2.4).
+ *
+ * Architecture (avoids truncated-JSON bugs without capping length):
+ * 1) Write body as free-form HTML, with automatic continuation on MAX_TOKENS.
+ * 2) Derive SEO metadata in a separate small JSON call.
  */
 export async function generateArticle(
   env: Env,
@@ -217,74 +498,11 @@ export async function generateArticle(
   keywords: string[] = [],
   context: ArticleContext = {}
 ): Promise<GeneratedArticle> {
-  const keywordLine =
-    keywords.length > 0
-      ? `מילות המפתח (ביטויי חיפוש) של העסק: ${keywords.join(", ")}. בחר את המתאימה ביותר לנושא הפוסט כ-focus_keyword (או נסח מתאימה אם אף אחת אינה מדויקת), ובנה את הפוסט סביבה.`
-      : "";
-  const categoryBlock = context.categoryName
-    ? [
-        "",
-        "המאמר נכתב עבור אתר מסחר אלקטרוני (חנות).",
-        `קטגוריית המוצרים שאליה המאמר משויך: ${context.categoryName}`,
-        context.productNames && context.productNames.length
-          ? `מוצרים מובילים ורלוונטיים בקטגוריה (התייחס אליהם באופן טבעי בתוכן, בלי לפרסם באגרסיביות): ${context.productNames.join(", ")}`
-          : "",
-        "יש להביא בחשבון את הקטגוריה ואת המוצרים כדי שהתוכן יהיה רלוונטי למוצרים הנמכרים באתר ולא גנרי.",
-      ].filter(Boolean)
-    : [];
-  const b = context.brief;
-  const briefBlock = b
-    ? [
-        "",
-        "בריף תוכן (Content Brief) — כתוב את המאמר לפי ההכוונה הזו:",
-        `תקציר: ${b.summary}`,
-        `זווית מרכזית: ${b.angle}`,
-        b.main_topics.length ? `נושאים מרכזיים לכיסוי: ${b.main_topics.join(" | ")}` : "",
-        b.deep_dive_points.length ? `נקודות להעמקה: ${b.deep_dive_points.join(" | ")}` : "",
-        `קהל יעד: ${b.target_audience}`,
-        `כוונת חיפוש: ${b.search_intent}`,
-        `ערך מעשי לקורא: ${b.reader_value}`,
-        `מילת מפתח ראשית: ${b.primary_keyword} — השתמש בה כ-focus_keyword ושלב אותה באופן טבעי בכותרת, בפתיח ובכותרות המשנה.`,
-        b.secondary_keywords.length
-          ? `מילות מפתח משניות ושאלות לשילוב טבעי: ${b.secondary_keywords.join(", ")}`
-          : "",
-        `שלב במסע הלקוח: ${JOURNEY_LABEL[b.journey_stage] ?? b.journey_stage}`,
-        "עקוב אחרי הכיוון של הבריף — הנושאים, הזווית, הכוונה והמילים — אבל כתוב מאמר זורם וטבעי. אל תעתיק את ניסוחי הבריף מילה במילה ואל תהפוך אותו לרשימת סעיפים מכנית.",
-      ].filter(Boolean)
-    : [];
-  const prompt = [
-    systemPrompt?.trim() || "כתוב מאמר בלוג איכותי, מקצועי ומותאם SEO בעברית.",
-    ...categoryBlock,
-    ...briefBlock,
-    "",
-    `נושא הפוסט: ${topic}`,
-    // When a brief exists its primary_keyword takes precedence over the generic list.
-    b ? "" : keywordLine,
-    "",
-    "החזר JSON עם השדות: title (כותרת), content_html (גוף הפוסט כ-HTML נקי עם <h2>/<h3>/<p>/<ul>),",
-    "focus_keyword (מילת מפתח ראשית), seo_title (כותרת SEO עד ~60 תווים), meta_description (תיאור מטא עד ~155 תווים).",
-    "כל הטקסט בעברית.",
-  ].filter(Boolean).join("\n");
-
-  // MEDIUM = best quality that still usually clears Cloudflare's ~100s limit.
-  // On 524, callGeminiText retries then falls back to Flash once.
-  const data = await callGeminiText(
-    env,
-    {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: ARTICLE_SCHEMA,
-        temperature: 0.8,
-        maxOutputTokens: 12288,
-      },
-    },
-    { thinkingLevel: "MEDIUM" }
-  );
-
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Gemini returned no content");
-  return JSON.parse(text) as GeneratedArticle;
+  const lang = langOf(context.language);
+  const contextBlocks = buildArticleContextBlocks(systemPrompt, topic, keywords, context);
+  const content_html = await generateArticleHtml(env, contextBlocks, lang);
+  const meta = await generateArticleSeoMeta(env, topic, content_html, context.brief, lang);
+  return { ...meta, content_html };
 }
 
 /**
@@ -293,41 +511,60 @@ export async function generateArticle(
  * forbids inventing numbers), the existing-content inventory, and the full
  * dedup list with a semantic-overlap rule.
  */
-function researchBlocks(research: IdeaResearch): string[] {
+function researchBlocks(research: IdeaResearch, lang: ContentLanguage): string[] {
+  const en = lang === "en";
   const gsc = research.gscQueries;
   const seoBlock = gsc && gsc.length
     ? [
-        "נתוני חיפוש אמיתיים מ-Google Search Console (90 הימים האחרונים) — התבסס עליהם:",
+        en
+          ? "Real Google Search Console data (last 90 days). Base your ideas on it:"
+          : "נתוני חיפוש אמיתיים מ-Google Search Console (90 הימים האחרונים). התבסס עליהם:",
         gsc
           .map(
             (r) =>
-              `- "${r.query}" · ${r.clicks} קליקים · ${r.impressions} הופעות · מיקום ממוצע ${r.position.toFixed(1)}`
+              en
+                ? `- "${r.query}" · ${r.clicks} clicks · ${r.impressions} impressions · avg position ${r.position.toFixed(1)}`
+                : `- "${r.query}" · ${r.clicks} קליקים · ${r.impressions} הופעות · מיקום ממוצע ${r.position.toFixed(1)}`
           )
           .join("\n"),
-        "בסס את מילות המפתח הראשיות והמשניות על שאילתות אמיתיות מהרשימה כשרלוונטי. שאילתות עם הרבה הופעות ומיקום ממוצע גבוה מ-10 הן הזדמנויות תוכן חזקות.",
+        en
+          ? "Ground primary and secondary keywords in real queries from the list when relevant. Queries with high impressions and an average position worse than 10 are strong content opportunities."
+          : "בסס את מילות המפתח הראשיות והמשניות על שאילתות אמיתיות מהרשימה כשרלוונטי. שאילתות עם הרבה הופעות ומיקום ממוצע גבוה מ-10 הן הזדמנויות תוכן חזקות.",
       ]
     : [
-        "אין נתוני חיפוש חיצוניים זמינים. בצע הערכה איכותנית בלבד של פוטנציאל החיפוש על בסיס כוונות חיפוש סבירות, שאלות נפוצות ושלבי קבלת החלטה.",
-        "**אסור להמציא נפחי חיפוש, מספרים או נתונים כמותיים.** נמק במילים בלבד.",
+        en
+          ? "No external search data is available. Make a qualitative estimate of search potential only, based on likely search intents, common questions, and decision stages."
+          : "אין נתוני חיפוש חיצוניים זמינים. בצע הערכה איכותנית בלבד של פוטנציאל החיפוש על בסיס כוונות חיפוש סבירות, שאלות נפוצות ושלבי קבלת החלטה.",
+        en
+          ? "**Do not invent search volumes, numbers, or quantitative data.** Explain in words only."
+          : "**אסור להמציא נפחי חיפוש, מספרים או נתונים כמותיים.** נמק במילים בלבד.",
       ];
+  const none = en ? "(none)" : "(אין)";
   return [
     ...seoBlock,
     "",
-    "מאמרים שכבר קיימים באתר (כותרת · מילת מפתח ראשית):",
+    en
+      ? "Articles already on the site (title · primary keyword):"
+      : "מאמרים שכבר קיימים באתר (כותרת · מילת מפתח ראשית):",
     research.existingPosts
       .map((p) => `- ${p.title}${p.focus_keyword ? ` · ${p.focus_keyword}` : ""}`)
-      .join("\n") || "(אין)",
+      .join("\n") || none,
     "",
-    "כל הרעיונות שהוצעו אי-פעם (כולל שנכתבו ושנדחו) — אין להציע אותם שוב:",
-    research.allIdeaTitles.map((t) => `- ${t}`).join("\n") || "(אין)",
+    en
+      ? "Every idea ever suggested (including written and rejected). Do not suggest them again:"
+      : "כל הרעיונות שהוצעו אי-פעם (כולל שנכתבו ושנדחו). אין להציע אותם שוב:",
+    research.allIdeaTitles.map((t) => `- ${t}`).join("\n") || none,
     "",
-    "מנע קניבליזציה: אל תציע רעיון שחופף סמנטית לכותרת קיימת או לרעיון קודם — גם אם הניסוח שונה. חפיפה סמנטית = אותו נושא ליבה ואותה כוונת חיפוש. אם נושא דומה כבר קיים, דלג עליו או הצע זווית שונה מהותית (קהל אחר, שלב אחר במסע הלקוח, או פורמט אחר) וציין זאת במפורש בשדה angle.",
+    en
+      ? "Avoid cannibalization: do not propose an idea that overlaps semantically with an existing title or a prior idea, even if the wording is different. Semantic overlap = the same core topic and the same search intent. If a similar topic already exists, skip it or propose a substantially different angle (different audience, different journey stage, or different format) and say so explicitly in the angle field."
+      : "מנע קניבליזציה: אל תציע רעיון שחופף סמנטית לכותרת קיימת או לרעיון קודם, גם אם הניסוח שונה. חפיפה סמנטית = אותו נושא ליבה ואותה כוונת חיפוש. אם נושא דומה כבר קיים, דלג עליו או הצע זווית שונה מהותית (קהל אחר, שלב אחר במסע הלקוח, או פורמט אחר) וציין זאת במפורש בשדה angle.",
   ];
 }
 
-/** The Hebrew instruction describing the full brief each idea must include. */
-const BRIEF_INSTRUCTION =
-  "לכל רעיון החזר בריף מלא: summary (תקציר של 2–4 משפטים), angle (הזווית המרכזית), main_topics (3–5 נושאים מרכזיים), deep_dive_points (נקודות שכדאי להעמיק בהן), target_audience (קהל היעד), search_intent (כוונת החיפוש), reader_value (הערך המעשי לקורא), category_fit (מדוע הרעיון מתאים), primary_keyword (מילת מפתח ראשית), secondary_keywords (3–8 מילות מפתח או שאלות משניות), journey_stage (אחד מ: discovery / comparison / decision / post-purchase). כל הטקסט בעברית מלבד journey_stage.";
+const BRIEF_INSTRUCTION: Record<ContentLanguage, string> = {
+  he: "לכל רעיון החזר בריף מלא: summary (תקציר של 2-4 משפטים), angle (הזווית המרכזית), main_topics (3-5 נושאים מרכזיים), deep_dive_points (נקודות שכדאי להעמיק בהן), target_audience (קהל היעד), search_intent (כוונת החיפוש), reader_value (הערך המעשי לקורא), category_fit (מדוע הרעיון מתאים), primary_keyword (מילת מפתח ראשית), secondary_keywords (3-8 מילות מפתח או שאלות משניות), journey_stage (אחד מ: discovery / comparison / decision / post-purchase). כל הטקסט בעברית מלבד journey_stage.",
+  en: "For each idea return a full brief: summary (2-4 sentences), angle (the central angle), main_topics (3-5 central topics), deep_dive_points (points worth going deeper on), target_audience, search_intent, reader_value (practical value for the reader), category_fit (why the idea fits), primary_keyword, secondary_keywords (3-8 secondary keywords or questions), journey_stage (one of: discovery / comparison / decision / post-purchase). All text in English except journey_stage.",
+};
 
 const BROCHURE_IDEAS_SCHEMA = {
   type: "object",
@@ -352,16 +589,28 @@ export async function generateIdeas(
   env: Env,
   systemPrompt: string,
   research: IdeaResearch,
-  count = 6
+  count = 6,
+  language: ContentLanguage = "he"
 ): Promise<{ title: string; brief: Omit<IdeaBrief, "seo_evidence_type"> }[]> {
+  const lang = langOf(language);
+  const en = lang === "en";
   const prompt = [
-    systemPrompt?.trim() || "אתה אסטרטג תוכן SEO לאתר תדמית בעברית.",
-    "בצע מחקר SEO קצר על סמך הנתונים שלהלן והפק בריפים מפורטים לרעיונות תוכן חדשים.",
+    systemPrompt?.trim() ||
+      (en
+        ? "You are an SEO content strategist for an English brochure website."
+        : "אתה אסטרטג תוכן SEO לאתר תדמית בעברית."),
+    en
+      ? "Run a short SEO research based on the data below and produce detailed briefs for new content ideas."
+      : "בצע מחקר SEO קצר על סמך הנתונים שלהלן והפק בריפים מפורטים לרעיונות תוכן חדשים.",
     "",
-    ...researchBlocks(research),
+    ...researchBlocks(research, lang),
     "",
-    `הפק ${count} רעיונות לפוסטים חדשים ואיכותיים הרלוונטיים לתחום האתר. ${BRIEF_INSTRUCTION}`,
-    "בשדה category_fit הסבר את ההתאמה לתחום האתר. החזר JSON: { ideas: [{ title, brief }] }.",
+    en
+      ? `Produce ${count} new, high-quality post ideas relevant to the site's field. ${BRIEF_INSTRUCTION.en}`
+      : `הפק ${count} רעיונות לפוסטים חדשים ואיכותיים הרלוונטיים לתחום האתר. ${BRIEF_INSTRUCTION.he}`,
+    en
+      ? "In category_fit explain how the idea fits the site. Return JSON: { ideas: [{ title, brief }] }."
+      : "בשדה category_fit הסבר את ההתאמה לתחום האתר. החזר JSON: { ideas: [{ title, brief }] }.",
   ].join("\n");
 
   const data = await callGeminiText(
@@ -402,11 +651,19 @@ export interface LinkSuggestion {
   reason: string;
 }
 
-const TYPE_LABEL: Record<string, string> = {
-  post: "פוסט",
-  page: "עמוד",
-  product_cat: "קטגוריית מוצר",
-  product_tag: "תגית מוצר",
+const TYPE_LABEL: Record<ContentLanguage, Record<string, string>> = {
+  he: {
+    post: "פוסט",
+    page: "עמוד",
+    product_cat: "קטגוריית מוצר",
+    product_tag: "תגית מוצר",
+  },
+  en: {
+    post: "post",
+    page: "page",
+    product_cat: "product category",
+    product_tag: "product tag",
+  },
 };
 
 const LINK_SCHEMA = {
@@ -440,36 +697,63 @@ export async function suggestInternalLinks(
   env: Env,
   postTitle: string,
   postText: string,
-  targets: LinkTargetInput[]
+  targets: LinkTargetInput[],
+  language: ContentLanguage = "he"
 ): Promise<LinkSuggestion[]> {
   if (!targets.length || postText.trim().length < 40) return [];
 
+  const lang = langOf(language);
+  const en = lang === "en";
+  const labels = TYPE_LABEL[lang];
   const catalog = targets
-    .map((t) => `- [${TYPE_LABEL[t.type] ?? t.type}] "${t.title}" → ${t.url}`)
+    .map((t) => `- [${labels[t.type] ?? t.type}] "${t.title}" → ${t.url}`)
     .join("\n");
 
-  const prompt = [
-    "אתה מומחה קישורים פנימיים (Internal Linking) ל-SEO בעברית. המטרה: להוסיף לפוסט קישורים פנימיים שיש להם ערך אמיתי לגולש — הקשריים, טבעיים, ומדויקים.",
-    "",
-    "להלן היעדים הקיימים באתר (עמודים, קטגוריות ותגיות מוצר בחנות, ופוסטים אחרים):",
-    catalog,
-    "",
-    `כותרת הפוסט: ${postTitle}`,
-    "תוכן הפוסט:",
-    '"""',
-    postText,
-    '"""',
-    "",
-    "כללים:",
-    "1. הצע קישור רק כשהוא באמת רלוונטי ומועיל לגולש בהקשר של הפסקה — לא סתם כי מילה מופיעה.",
-    "2. עוגן הקישור (anchor) חייב להיות מחרוזת שמופיעה **מילה-במילה** בתוך תוכן הפוסט (העתק מדויק, כולל אותיות יחס). עדיף ביטוי בן 2-5 מילים, לא מילה בודדת גנרית ולא משפט שלם.",
-    "3. כל עוגן פעם אחת בלבד. אל תציע קישור לאותו יעד פעמיים.",
-    "4. התאם כל עוגן ליעד ההקשרי ביותר: הזכרת סוג מוצר → קטגוריית/תגית המוצר; נושא שיש עליו פוסט → הפוסט; מידע כללי → העמוד.",
-    "5. איכות על פני כמות — עד 8 הצעות, רק כאלה עם ערך ברור. אם אין התאמות טובות, החזר מערך ריק.",
-    "6. לכל הצעה כתוב reason קצר בעברית שמסביר את הערך לגולש.",
-    "",
-    "החזר JSON: { suggestions: [{ anchor, target_url, target_title, target_type, reason }] }. target_url חייב להיות אחד מה-URL-ים ברשימה.",
-  ].join("\n");
+  const prompt = en
+    ? [
+        "You are an internal-linking expert for English SEO. Goal: add internal links that give the reader real value - contextual, natural, and precise.",
+        "",
+        "Existing destinations on the site (pages, product categories/tags in the store, and other posts):",
+        catalog,
+        "",
+        `Post title: ${postTitle}`,
+        "Post content:",
+        '"""',
+        postText,
+        '"""',
+        "",
+        "Rules:",
+        "1. Suggest a link only when it is truly relevant and useful to the reader in that paragraph, not just because a word appears.",
+        "2. The anchor must be a string that appears **verbatim** in the post body (exact copy, including function words). Prefer a 2-5 word phrase, not a generic single word and not a full sentence.",
+        "3. Each anchor once only. Do not suggest a link to the same destination twice.",
+        "4. Match each anchor to the most contextual destination: a product type mention → that product category/tag, a topic that has a post → that post, general information → the page.",
+        "5. Quality over quantity - up to 8 suggestions, only ones with clear value. If there are no good matches, return an empty array.",
+        "6. For each suggestion write a short reason in English that explains the value to the reader.",
+        "",
+        "Return JSON: { suggestions: [{ anchor, target_url, target_title, target_type, reason }] }. target_url must be one of the URLs in the list.",
+      ].join("\n")
+    : [
+        "אתה מומחה קישורים פנימיים (Internal Linking) ל-SEO בעברית. המטרה: להוסיף לפוסט קישורים פנימיים שיש להם ערך אמיתי לגולש - הקשריים, טבעיים, ומדויקים.",
+        "",
+        "להלן היעדים הקיימים באתר (עמודים, קטגוריות ותגיות מוצר בחנות, ופוסטים אחרים):",
+        catalog,
+        "",
+        `כותרת הפוסט: ${postTitle}`,
+        "תוכן הפוסט:",
+        '"""',
+        postText,
+        '"""',
+        "",
+        "כללים:",
+        "1. הצע קישור רק כשהוא באמת רלוונטי ומועיל לגולש בהקשר של הפסקה - לא סתם כי מילה מופיעה.",
+        "2. עוגן הקישור (anchor) חייב להיות מחרוזת שמופיעה **מילה-במילה** בתוך תוכן הפוסט (העתק מדויק, כולל אותיות יחס). עדיף ביטוי בן 2-5 מילים, לא מילה בודדת גנרית ולא משפט שלם.",
+        "3. כל עוגן פעם אחת בלבד. אל תציע קישור לאותו יעד פעמיים.",
+        "4. התאם כל עוגן ליעד ההקשרי ביותר: הזכרת סוג מוצר → קטגוריית/תגית המוצר. נושא שיש עליו פוסט → הפוסט. מידע כללי → העמוד.",
+        "5. איכות על פני כמות - עד 8 הצעות, רק כאלה עם ערך ברור. אם אין התאמות טובות, החזר מערך ריק.",
+        "6. לכל הצעה כתוב reason קצר בעברית שמסביר את הערך לגולש.",
+        "",
+        "החזר JSON: { suggestions: [{ anchor, target_url, target_title, target_type, reason }] }. target_url חייב להיות אחד מה-URL-ים ברשימה.",
+      ].join("\n");
 
   const data = await callGeminiText(
     env,
@@ -529,28 +813,46 @@ export async function generateCategoryIdeas(
   systemPrompt: string,
   categories: { id: number; name: string; sampleProducts: string[] }[],
   research: IdeaResearch,
-  count = 6
+  count = 6,
+  language: ContentLanguage = "he"
 ): Promise<CategoryIdea[]> {
+  const lang = langOf(language);
+  const en = lang === "en";
   const catalog = categories
     .map(
       (c) =>
         `- category_id ${c.id} · "${c.name}"${
-          c.sampleProducts.length ? ` (מוצרים לדוגמה: ${c.sampleProducts.slice(0, 12).join(", ")})` : ""
+          c.sampleProducts.length
+            ? en
+              ? ` (sample products: ${c.sampleProducts.slice(0, 12).join(", ")})`
+              : ` (מוצרים לדוגמה: ${c.sampleProducts.slice(0, 12).join(", ")})`
+            : ""
         }`
     )
     .join("\n");
 
   const prompt = [
-    systemPrompt?.trim() || "אתה אסטרטג תוכן SEO לחנות מסחר אלקטרוני בעברית.",
-    "בצע מחקר SEO קצר על סמך הנתונים שלהלן והפק בריפים מפורטים לרעיונות תוכן חדשים.",
+    systemPrompt?.trim() ||
+      (en
+        ? "You are an SEO content strategist for an English ecommerce store."
+        : "אתה אסטרטג תוכן SEO לחנות מסחר אלקטרוני בעברית."),
+    en
+      ? "Run a short SEO research based on the data below and produce detailed briefs for new content ideas."
+      : "בצע מחקר SEO קצר על סמך הנתונים שלהלן והפק בריפים מפורטים לרעיונות תוכן חדשים.",
     "",
-    "קטגוריות המוצרים הזמינות (עם מוצרים לדוגמה מהמלאי):",
+    en
+      ? "Available product categories (with sample products from stock):"
+      : "קטגוריות המוצרים הזמינות (עם מוצרים לדוגמה מהמלאי):",
     catalog,
     "",
-    ...researchBlocks(research),
+    ...researchBlocks(research, lang),
     "",
-    `הפק ${count} רעיונות למאמרים חדשים ואיכותיים. כל רעיון חייב להיות משויך ל-category_id אחד מהרשימה — הרלוונטי ביותר לנושא הכתבה — כדי שהתוכן יתמוך במוצרים הנמכרים בקטגוריה. ${BRIEF_INSTRUCTION}`,
-    "החזר JSON: { ideas: [{ title, category_id, brief }] }.",
+    en
+      ? `Produce ${count} new, high-quality article ideas. Each idea must be tied to one category_id from the list - the most relevant to the article topic - so the content supports products sold in that category. ${BRIEF_INSTRUCTION.en}`
+      : `הפק ${count} רעיונות למאמרים חדשים ואיכותיים. כל רעיון חייב להיות משויך ל-category_id אחד מהרשימה - הרלוונטי ביותר לנושא הכתבה - כדי שהתוכן יתמוך במוצרים הנמכרים בקטגוריה. ${BRIEF_INSTRUCTION.he}`,
+    en
+      ? "Return JSON: { ideas: [{ title, category_id, brief }] }."
+      : "החזר JSON: { ideas: [{ title, category_id, brief }] }.",
   ].join("\n");
 
   const data = await callGeminiText(

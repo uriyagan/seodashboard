@@ -14,6 +14,7 @@ export function ProjectSettings() {
   const [name, setName] = useState("");
   const [contentPrompt, setContentPrompt] = useState("");
   const [imagePrompt, setImagePrompt] = useState("");
+  const [contentLanguage, setContentLanguage] = useState<"he" | "en">("he");
   const [cadence, setCadence] = useState(1);
   const [stuckDays, setStuckDays] = useState(3);
   const [keywords, setKeywords] = useState<string[]>([]);
@@ -27,6 +28,7 @@ export function ProjectSettings() {
     setName(activeProject.name);
     setContentPrompt(activeProject.content_prompt ?? "");
     setImagePrompt(activeProject.image_prompt ?? "");
+    setContentLanguage(activeProject.content_language === "en" ? "en" : "he");
     setCadence(activeProject.cadence_per_week ?? 1);
     setStuckDays(activeProject.stuck_draft_days ?? 3);
     setKeywords(activeProject.keywords ?? []);
@@ -44,6 +46,7 @@ export function ProjectSettings() {
         name: name.trim(),
         content_prompt: contentPrompt,
         image_prompt: imagePrompt,
+        content_language: contentLanguage,
         keywords,
         cadence_per_week: cadence,
         stuck_draft_days: stuckDays,
@@ -120,6 +123,21 @@ export function ProjectSettings() {
           <Label htmlFor="s-name">שם הפרויקט</Label>
           <Input id="s-name" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
+        <div>
+          <Label htmlFor="s-lang">שפת התוכן</Label>
+          <select
+            id="s-lang"
+            value={contentLanguage}
+            onChange={(e) => setContentLanguage(e.target.value === "en" ? "en" : "he")}
+            className="h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3.5 text-sm text-[var(--text)] outline-none focus-visible:border-[var(--brand)] focus-visible:ring-2 focus-visible:ring-[var(--brand)]/40"
+          >
+            <option value="he">עברית</option>
+            <option value="en">English</option>
+          </select>
+          <p className="mt-1.5 text-xs text-[var(--muted)]">
+            רעיונות, מאמרים ומטא-דאטה SEO ייכתבו בשפה הזו. הממשק נשאר בעברית.
+          </p>
+        </div>
       </Card>
 
       <Card className="mb-4 space-y-4 p-5">
@@ -131,7 +149,12 @@ export function ProjectSettings() {
             rows={6}
             value={contentPrompt}
             onChange={(e) => setContentPrompt(e.target.value)}
-            placeholder="לדוגמה: כתוב מאמר מקצועי בעברית בגוף שלישי, טון מקצועי, כ-800 מילים, עם כותרות משנה…"
+            dir={contentLanguage === "en" ? "ltr" : "rtl"}
+            placeholder={
+              contentLanguage === "en"
+                ? "e.g. Write a professional article in English, third person, ~800 words, with subheadings…"
+                : "לדוגמה: כתוב מאמר מקצועי בעברית בגוף שלישי, טון מקצועי, כ-800 מילים, עם כותרות משנה…"
+            }
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm leading-relaxed outline-none focus-visible:border-[var(--brand)] focus-visible:ring-2 focus-visible:ring-[var(--brand)]/40"
           />
         </div>

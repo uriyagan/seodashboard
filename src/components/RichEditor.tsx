@@ -39,12 +39,14 @@ export function RichEditor({
   onChange,
   onInit,
   onUploadImage,
+  directionality = "rtl",
 }: {
   value: string;
   onChange: (html: string) => void;
   onInit?: (editor: RichEditorHandle) => void;
   /** Uploads an image to WordPress media and returns its public URL. */
   onUploadImage?: (base64: string, filename: string, mimeType: string) => Promise<{ url: string }>;
+  directionality?: "rtl" | "ltr";
 }) {
   return (
     <Editor
@@ -57,7 +59,7 @@ export function RichEditor({
         menubar: true,
         skin: false,
         content_css: false,
-        directionality: "rtl",
+        directionality,
         branding: false,
         promotion: false,
         // Let the browser's/OS native spellcheck underline + suggest corrections.
@@ -121,7 +123,7 @@ export function RichEditor({
           // Load Google Sans inside the editor iframe.
           "@font-face{font-family:'Google Sans';src:url('/fonts/GoogleSans.woff2') format('woff2');font-weight:100 900;font-display:swap}",
           // Font sizes matched to the live site rendering.
-          "body{font-family:'Google Sans',Arial,sans-serif;direction:rtl;font-size:18px;line-height:1.7;margin:1rem}",
+          `body{font-family:'Google Sans',Arial,sans-serif;direction:${directionality};font-size:18px;line-height:1.7;margin:1rem}`,
           "p{font-size:18px}",
           "h1{font-size:60px;line-height:1.1}",
           "h2{font-size:50px;line-height:1.15}",
@@ -150,7 +152,10 @@ export function RichEditor({
         ],
         toolbar:
           "undo redo | blocks | bold italic underline | forecolor backcolor | " +
-          "alignright aligncenter alignleft | bullist numlist | link image media table | " +
+          (directionality === "ltr"
+            ? "alignleft aligncenter alignright"
+            : "alignright aligncenter alignleft") +
+          " | bullist numlist | link image media table | " +
           "ltr rtl | removeformat code fullscreen",
         block_formats:
           "פסקה=p; כותרת 2=h2; כותרת 3=h3; כותרת 4=h4; ציטוט=blockquote",

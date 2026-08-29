@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Env } from "../index";
 import { decrypt } from "./crypto";
 import type { WpAuth, RelayConfig } from "./wordpress";
+import { parseContentLanguage, type ContentLanguage } from "./contentLanguage";
 
 /** Global static-IP relay config from env (undefined if not configured). */
 export function relayFrom(env: Env): RelayConfig | undefined {
@@ -18,6 +19,7 @@ export interface ProjectRow {
   wp_app_password_encrypted: string | null;
   content_prompt: string;
   image_prompt: string;
+  content_language: ContentLanguage;
   keywords: string[];
   cadence_per_week: number;
   stuck_draft_days: number;
@@ -33,12 +35,13 @@ export async function loadProject(
   const { data, error } = await sb
     .from("projects")
     .select(
-      "id, name, site_url, wp_username, wp_app_password_encrypted, content_prompt, image_prompt, keywords, cadence_per_week, stuck_draft_days, last_post_at, gsc_property"
+      "id, name, site_url, wp_username, wp_app_password_encrypted, content_prompt, image_prompt, content_language, keywords, cadence_per_week, stuck_draft_days, last_post_at, gsc_property"
     )
     .eq("id", projectId)
     .single();
   if (error || !data) return null;
-  return data as ProjectRow;
+  const row = data as Omit<ProjectRow, "content_language"> & { content_language?: string };
+  return { ...row, content_language: parseContentLanguage(row.content_language) };
 }
 
 /** Builds decrypted WordPress auth from a project row. */

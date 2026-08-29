@@ -20,6 +20,7 @@ import {
 } from "../lib/wordpress";
 import { makeCompanionRunner, type CompanionRunner } from "../lib/companion";
 import { relayFrom } from "../lib/project";
+import { parseContentLanguage } from "../lib/contentLanguage";
 
 export const projects = new Hono<{ Bindings: Env }>();
 
@@ -252,6 +253,7 @@ projects.post("/api/projects/connect", async (c) => {
     url: string;
     username: string;
     appPassword: string;
+    contentLanguage?: string;
   }>();
 
   const auth: WpAuth = {
@@ -276,6 +278,7 @@ projects.post("/api/projects/connect", async (c) => {
       site_url: auth.siteUrl,
       wp_username: auth.username,
       wp_app_password_encrypted: encrypted,
+      content_language: parseContentLanguage(body.contentLanguage),
     })
     .select("id, companion_token")
     .single();

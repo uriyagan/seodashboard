@@ -9,6 +9,7 @@ import {
 } from "react";
 import { supabase } from "./supabase";
 import type { Project } from "./types";
+import { parseContentLanguage } from "./types";
 
 const ACTIVE_KEY = "seo_dash_active_project";
 
@@ -43,7 +44,12 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       setError(error.message);
       setProjects([]);
     } else {
-      setProjects((data ?? []) as Project[]);
+      setProjects(
+        (data ?? []).map((p) => ({
+          ...(p as Project),
+          content_language: parseContentLanguage((p as Project).content_language),
+        }))
+      );
     }
     setLoading(false);
   }, []);

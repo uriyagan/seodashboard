@@ -82,6 +82,7 @@ export function YoastAnalysis({ input }: { input: AnalysisInput }) {
     input.slug,
     input.titleWidth,
     input.siteUrl,
+    input.locale,
   ]);
 
   return (

@@ -194,7 +194,7 @@ links.post("/api/projects/:id/links/scan", async (c) => {
         .eq("source_wp_id", src.wp_id);
       const linked = new Set((existing ?? []).map((r) => trimUrl(r.target_url as string)));
 
-      const raw = await suggestInternalLinks(c.env, src.title, plain, targets);
+      const raw = await suggestInternalLinks(c.env, src.title, plain, targets, project.content_language);
       const seen = new Set<string>();
       const valid = raw.filter((s) => {
         const anchor = (s.anchor ?? "").trim();

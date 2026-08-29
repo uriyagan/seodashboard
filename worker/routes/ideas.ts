@@ -11,6 +11,7 @@ import {
   type IdeaBrief,
   type IdeaResearch,
 } from "../lib/gemini";
+import { featuredImagePrompt } from "../lib/contentLanguage";
 import { uploadMedia } from "../lib/wordpress";
 import { accessToken, scQuery } from "./gsc";
 import type { ProjectRow } from "../lib/project";
@@ -149,7 +150,13 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
   // general ideas from the existing content, with no category association.
   if (!allEligible.length) {
     try {
-      const suggestions = await generateIdeas(c.env, project.content_prompt, research, 6);
+      const suggestions = await generateIdeas(
+        c.env,
+        project.content_prompt,
+        research,
+        6,
+        project.content_language
+      );
       const rows = suggestions
         .filter((s) => s.title)
         .map((s) => ({
@@ -191,7 +198,8 @@ ideas.post("/api/projects/:id/ideas/generate", async (c) => {
       project.content_prompt,
       catalog,
       research,
-      6
+      6,
+      project.content_language
     );
 
     const rows = suggestions
@@ -305,6 +313,7 @@ ideas.post("/api/projects/:id/ideas/:ideaId/write", async (c) => {
         categoryName: idea.product_category_name ?? undefined,
         productNames,
         brief: (idea.brief as IdeaBrief | null) ?? undefined,
+        language: project.content_language,
       }
     );
 
@@ -340,7 +349,8 @@ ideas.post("/api/projects/:id/ideas/:ideaId/write", async (c) => {
     c.executionCtx.waitUntil(
       (async () => {
         try {
-          const img = await generateImage(env, project.image_prompt, `תמונה ראשית לפוסט: ${article.title}`);
+          const imgPrompt = featuredImagePrompt(article.title, project.content_language);
+          const img = await generateImage(env, project.image_prompt, imgPrompt);
           const auth = await projectAuth(env, project);
           const bin = atob(img.base64);
           const bytes = new Uint8Array(bin.length);
@@ -354,7 +364,7 @@ ideas.post("/api/projects/:id/ideas/:ideaId/write", async (c) => {
           await sb.from("post_images").insert({
             project_id: projectId,
             role: "featured",
-            prompt: `תמונה ראשית לפוסט: ${article.title}`,
+            prompt: imgPrompt,
             wp_media_id: media.id,
             wp_url: media.url,
           });

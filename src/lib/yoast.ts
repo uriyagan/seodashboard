@@ -1,7 +1,8 @@
 /**
  * Live Yoast SEO + readability analysis, using Yoast's own `yoastseo` engine
- * with the Hebrew researcher. Heavy — dynamically imported on first use.
+ * with the Hebrew or English researcher. Heavy - dynamically imported on first use.
  */
+import type { ContentLanguage } from "@/lib/types";
 
 export type Rating = "good" | "ok" | "bad";
 
@@ -29,6 +30,8 @@ export interface AnalysisInput {
   /** SEO-title width in pixels (Yoast's title check uses px, not chars).
    *  Measured on the main thread via measureTitleWidth; 0 in the worker. */
   titleWidth: number;
+  /** Content language for the researcher (morphology, stop words). UI labels stay Hebrew. */
+  locale?: ContentLanguage;
 }
 
 /**
@@ -130,22 +133,25 @@ interface YoastEngine {
   Researcher: new (p: unknown) => unknown;
 }
 
-let loaded: YoastEngine | null = null;
+let loaded: Partial<Record<ContentLanguage, YoastEngine>> = {};
 
-async function load(): Promise<YoastEngine> {
-  if (loaded) return loaded;
+async function load(locale: ContentLanguage): Promise<YoastEngine> {
+  const cached = loaded[locale];
+  if (cached) return cached;
   const y = await import("yoastseo");
-  const researcherMod = await import(
-    "yoastseo/build/languageProcessing/languages/he/Researcher"
-  );
-  loaded = {
+  const researcherMod =
+    locale === "en"
+      ? await import("yoastseo/build/languageProcessing/languages/en/Researcher")
+      : await import("yoastseo/build/languageProcessing/languages/he/Researcher");
+  const engine: YoastEngine = {
     Paper: y.Paper,
     SeoAssessor: y.SeoAssessor,
     ContentAssessor: y.ContentAssessor,
     interpreters: y.interpreters,
     Researcher: researcherMod.default,
   };
-  return loaded;
+  loaded[locale] = engine;
+  return engine;
 }
 
 function toRating(scoreToRating: (s: number) => string, score: number): Rating {
@@ -160,7 +166,8 @@ function strip(html: string): string {
 }
 
 export async function analyzeYoast(input: AnalysisInput): Promise<Analysis> {
-  const { Paper, SeoAssessor, ContentAssessor, interpreters, Researcher } = await load();
+  const locale: ContentLanguage = input.locale === "en" ? "en" : "he";
+  const { Paper, SeoAssessor, ContentAssessor, interpreters, Researcher } = await load(locale);
   const { scoreToRating } = interpreters;
 
   const paper = new Paper(input.content || "", {
@@ -171,7 +178,7 @@ export async function analyzeYoast(input: AnalysisInput): Promise<Analysis> {
     slug: input.slug || "",
     // Full URL (with hostname) so same-domain links count as internal.
     permalink: input.siteUrl || "",
-    locale: "he_IL",
+    locale: locale === "en" ? "en_US" : "he_IL",
   });
   const researcher = new Researcher(paper);
 

@@ -30,6 +30,7 @@ export function AddSiteWizard({ onClose }: { onClose: () => void }) {
   const [username, setUsername] = useState("");
   const [appPassword, setAppPassword] = useState("");
   const [name, setName] = useState("");
+  const [contentLanguage, setContentLanguage] = useState<"he" | "en">("he");
   const [wpUser, setWpUser] = useState<string | null>(null);
   const [yoast, setYoast] = useState(false);
   const [firewalled, setFirewalled] = useState(false);
@@ -109,6 +110,7 @@ export function AddSiteWizard({ onClose }: { onClose: () => void }) {
         url: cleanUrl,
         username: username.trim(),
         appPassword: appPassword.trim(),
+        contentLanguage,
       });
       if (!r.ok) throw new Error(r.error || "החיבור נכשל");
       await reload();
@@ -336,6 +338,21 @@ export function AddSiteWizard({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setName(e.target.value)}
                   required
                 />
+              </div>
+              <div>
+                <Label htmlFor="w-lang">שפת התוכן</Label>
+                <select
+                  id="w-lang"
+                  value={contentLanguage}
+                  onChange={(e) => setContentLanguage(e.target.value === "en" ? "en" : "he")}
+                  className="h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3.5 text-sm text-[var(--text)] outline-none focus-visible:border-[var(--brand)] focus-visible:ring-2 focus-visible:ring-[var(--brand)]/40"
+                >
+                  <option value="he">עברית</option>
+                  <option value="en">English</option>
+                </select>
+                <p className="mt-1.5 text-xs text-[var(--muted)]">
+                  רעיונות ומאמרים שהמערכת תייצר ייכתבו בשפה הזו.
+                </p>
               </div>
               <p className="text-xs text-[var(--muted)]">
                 בלחיצה נסנכרן מיד את כל הפוסטים, הקטגוריות והתגיות מהאתר.

@@ -1,3 +1,10 @@
+/** Language of generated ideas, articles, and SEO metadata. Dashboard UI stays Hebrew. */
+export type ContentLanguage = "he" | "en";
+
+export function parseContentLanguage(value: unknown): ContentLanguage {
+  return value === "en" ? "en" : "he";
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -5,6 +12,8 @@ export interface Project {
   wp_username: string | null;
   content_prompt: string;
   image_prompt: string;
+  /** `he` (default) or `en`. Controls Gemini ideas/posts, not the dashboard UI. */
+  content_language: ContentLanguage;
   keywords: string[];
   cadence_per_week: number;
   stuck_draft_days: number;

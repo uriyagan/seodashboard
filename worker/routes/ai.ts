@@ -85,7 +85,11 @@ ai.post("/api/projects/:id/ai/write", async (c) => {
       project.content_prompt,
       topic.trim(),
       project.keywords,
-      { categoryName: categoryName ?? undefined, productNames }
+      {
+        categoryName: categoryName ?? undefined,
+        productNames,
+        language: project.content_language,
+      }
     );
     return c.json({
       ok: true,
@@ -109,6 +113,8 @@ ai.post("/api/projects/:id/internal-links", async (c) => {
   const sb = await requireAdmin(c.env, c.req.raw);
   if (!sb) return c.json({ error: "unauthorized" }, 401);
   const projectId = c.req.param("id");
+  const project = await loadProject(sb, projectId);
+  if (!project) return c.json({ error: "project not found" }, 404);
 
   const { content_html, title } = await c.req.json<{ content_html: string; title?: string }>();
   const plain = (content_html ?? "")
@@ -127,7 +133,7 @@ ai.post("/api/projects/:id/internal-links", async (c) => {
   const urlSet = new Set(targets.map((t) => t.url));
 
   try {
-    const raw = await suggestInternalLinks(c.env, title ?? "", plain, targets);
+    const raw = await suggestInternalLinks(c.env, title ?? "", plain, targets, project.content_language);
     // Keep only anchors that appear verbatim in the post and known targets; dedupe.
     const seen = new Set<string>();
     const suggestions = raw.filter((s) => {

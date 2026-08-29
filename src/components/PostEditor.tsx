@@ -23,6 +23,7 @@ import { WpMediaPicker } from "@/components/WpMediaPicker";
 import { YoastAnalysis } from "@/components/YoastAnalysis";
 import { InternalLinks } from "@/components/InternalLinks";
 import { measureTitleWidth } from "@/lib/yoast";
+import { parseContentLanguage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** Approximate the post slug from its title (keeps Hebrew letters). */
@@ -236,6 +237,7 @@ export function PostEditor({
   const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const productInputRef = useRef<HTMLInputElement>(null);
+  const [featuredDragOver, setFeaturedDragOver] = useState(false);
   const [productRef, setProductRef] = useState<{
     base64: string;
     mimeType: string;
@@ -316,74 +318,107 @@ export function PostEditor({
     });
   }
 
-  // Load existing post (local row; fetch WP content if empty).
+  // Load existing post (local row first; enrich from WP in the background).
   useEffect(() => {
     if (!postId || !activeProject) return;
+    let cancelled = false;
     (async () => {
       setLoading(true);
-      const { data } = await supabase.from("posts").select("*").eq("id", postId).single();
-      if (data) {
-        let content = data.content_html as string;
-        let featuredUrl = (data.featured_image_url as string) ?? "";
-        let featuredMedia: number | null = null;
-        // For synced posts (no local content yet) pull full content + featured image.
-        if ((!content || !featuredUrl) && data.wp_post_id) {
-          try {
-            const r = await api<{
-              ok: boolean;
-              post?: {
-                content_html: string;
-                focus_keyword: string;
-                seo_title: string;
-                meta_description: string;
-                featured_image_url: string;
-                featured_media: number;
-              };
-            }>(`/api/projects/${activeProject.id}/posts/${data.wp_post_id}`, undefined, "GET");
-            if (r.ok && r.post) {
-              content = content || r.post.content_html;
-              featuredUrl = featuredUrl || r.post.featured_image_url;
-              featuredMedia = r.post.featured_media || null;
-              data.focus_keyword ||= r.post.focus_keyword;
-              data.seo_title ||= r.post.seo_title;
-              data.meta_description ||= r.post.meta_description;
-            }
-          } catch { /* keep empty */ }
-        }
+      setError(null);
+      const { data, error: loadErr } = await supabase
+        .from("posts")
+        .select("*")
+        .eq("id", postId)
+        .single();
+      if (cancelled) return;
+      if (loadErr || !data) {
+        setError(loadErr?.message || "הפוסט לא נמצא");
+        setLoading(false);
+        return;
+      }
+
+      const applyRow = (
+        row: typeof data,
+        content: string,
+        featuredUrl: string,
+        featuredMedia: number | null
+      ) => {
         setState({
-          id: data.id,
-          wp_post_id: data.wp_post_id,
-          title: data.title ?? "",
+          id: row.id,
+          wp_post_id: row.wp_post_id,
+          title: row.title ?? "",
           content_html: content ?? "",
-          status: data.wp_status ?? "draft",
-          focus_keyword: data.focus_keyword ?? "",
-          seo_title: data.seo_title ?? "",
-          meta_description: data.meta_description ?? "",
+          status: row.wp_status ?? "draft",
+          focus_keyword: row.focus_keyword ?? "",
+          seo_title: row.seo_title ?? "",
+          meta_description: row.meta_description ?? "",
           featured_image_url: featuredUrl,
           featured_media: featuredMedia,
-          categories: (data.categories ?? []) as Term[],
-          tags: (data.tags ?? []) as Term[],
-          product_category_id: (data.product_category_id as number | null) ?? null,
-          product_category_name: (data.product_category_name as string | null) ?? null,
-          product_names: (data.product_names as string[] | null) ?? [],
-          link: (data.link as string | null) ?? null,
+          categories: (row.categories ?? []) as Term[],
+          tags: (row.tags ?? []) as Term[],
+          product_category_id: (row.product_category_id as number | null) ?? null,
+          product_category_name: (row.product_category_name as string | null) ?? null,
+          product_names: (row.product_names as string[] | null) ?? [],
+          link: (row.link as string | null) ?? null,
         });
-      }
+      };
+
+      // Paint local data immediately so a slow/blocked WordPress fetch
+      // never leaves the editor stuck on a blank spinner.
+      let content = (data.content_html as string) ?? "";
+      let featuredUrl = (data.featured_image_url as string) ?? "";
+      applyRow(data, content, featuredUrl, null);
       setLoading(false);
+
+      if ((!content || !featuredUrl) && data.wp_post_id) {
+        try {
+          const r = await api<{
+            ok: boolean;
+            post?: {
+              content_html: string;
+              focus_keyword: string;
+              seo_title: string;
+              meta_description: string;
+              featured_image_url: string;
+              featured_media: number;
+            };
+            error?: string;
+          }>(`/api/projects/${activeProject.id}/posts/${data.wp_post_id}`, undefined, "GET");
+          if (cancelled) return;
+          if (r.ok && r.post) {
+            content = content || r.post.content_html;
+            featuredUrl = featuredUrl || r.post.featured_image_url;
+            data.focus_keyword ||= r.post.focus_keyword;
+            data.seo_title ||= r.post.seo_title;
+            data.meta_description ||= r.post.meta_description;
+            applyRow(data, content, featuredUrl, r.post.featured_media || null);
+          } else if (!content) {
+            setError(r.error || "טעינת התוכן מ-WordPress נכשלה");
+          }
+        } catch (e) {
+          if (!cancelled && !content) {
+            setError(e instanceof Error ? e.message : "טעינת התוכן מ-WordPress נכשלה");
+          }
+        }
+      }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [postId, activeProject]);
 
   if (!activeProject) return null;
+
+  const contentLang = parseContentLanguage(activeProject.content_language);
+  const contentDir = contentLang === "en" ? "ltr" : "rtl";
 
   async function saveLocal(): Promise<string | null> {
     // Upload any pasted/dropped images to WP first so no blob:/data: URIs are
     // persisted, then read the freshest content (src rewritten to WP URLs).
     let contentHtml = state.content_html;
-    try {
-      await editorRef.current?.uploadImages();
-      contentHtml = editorRef.current?.getContent() ?? state.content_html;
-      if (contentHtml !== state.content_html) set("content_html", contentHtml);
-    } catch { /* upload errors surface via the editor UI */ }
+    await editorRef.current?.uploadImages();
+    contentHtml = editorRef.current?.getContent() ?? state.content_html;
+    if (contentHtml !== state.content_html) set("content_html", contentHtml);
     const row = {
       id: state.id ?? undefined,
       project_id: activeProject!.id,
@@ -508,10 +543,11 @@ export function PostEditor({
     }
   }
 
-  async function onUploadImage(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  async function uploadFeaturedFile(file: File) {
+    if (!file.type.startsWith("image/")) {
+      setError("יש לגרור קובץ תמונה בלבד");
+      return;
+    }
     setBusy("upload");
     setError(null);
     setNotice(null);
@@ -522,9 +558,12 @@ export function PostEditor({
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
+      // Sanitize Hebrew/odd filenames — some hosts reject non-ASCII Content-Disposition.
+      const rawName = file.name || "image.png";
+      const safe = /^[\w.\-]+$/.test(rawName) ? rawName : `image-${Date.now()}.png`;
       const r = await api<{ ok: boolean; url?: string; mediaId?: number; error?: string }>(
         `/api/projects/${activeProject!.id}/media`,
-        { base64, mimeType: file.type || "image/png", filename: file.name || "image.png" }
+        { base64, mimeType: file.type || "image/png", filename: safe }
       );
       if (!r.ok || !r.url) throw new Error(r.error || "ההעלאה נכשלה");
       set("featured_image_url", r.url);
@@ -535,6 +574,38 @@ export function PostEditor({
     } finally {
       setBusy(null);
     }
+  }
+
+  async function onUploadImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    await uploadFeaturedFile(file);
+  }
+
+  function onFeaturedDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy === "upload") return;
+    if ([...e.dataTransfer.types].includes("Files")) setFeaturedDragOver(true);
+  }
+
+  function onFeaturedDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only clear when leaving the drop zone itself (not a child).
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setFeaturedDragOver(false);
+  }
+
+  async function onFeaturedDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setFeaturedDragOver(false);
+    if (busy === "upload") return;
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    await uploadFeaturedFile(file);
   }
 
   async function onAttachProduct(e: React.ChangeEvent<HTMLInputElement>) {
@@ -558,7 +629,10 @@ export function PostEditor({
       const r = await api<{ ok: boolean; url?: string; mediaId?: number; error?: string }>(
         `/api/projects/${activeProject!.id}/ai/image`,
         {
-          specific: `תמונה ראשית לפוסט: ${state.title}`,
+          specific:
+            parseContentLanguage(activeProject!.content_language) === "en"
+              ? `Featured image for the post: ${state.title}`
+              : `תמונה ראשית לפוסט: ${state.title}`,
           role: "featured",
           upload: true,
           refImages: productRef ? [{ base64: productRef.base64, mimeType: productRef.mimeType }] : [],
@@ -634,6 +708,7 @@ export function PostEditor({
               value={state.title}
               onChange={(e) => set("title", e.target.value)}
               placeholder="כותרת הפוסט"
+              dir={contentDir}
               className="h-14 !text-xl font-bold"
             />
             <Button variant="outline" onClick={onWriteAI} loading={busy === "write"} className="w-full">
@@ -661,6 +736,8 @@ export function PostEditor({
             </div>
             <div className="min-h-0 flex-1">
               <RichEditor
+                key={contentLang}
+                directionality={contentDir}
                 value={state.content_html}
                 onChange={(html) => set("content_html", html)}
                 onInit={(ed) => (editorRef.current = ed)}
@@ -675,13 +752,27 @@ export function PostEditor({
             <Card className="p-4">
               <h3 className="mb-3 text-sm font-semibold text-[var(--text)]">תמונה ראשית</h3>
               {state.featured_image_url ? (
-                <div className="group relative mb-3">
+                <div
+                  className={cn(
+                    "group relative mb-3 rounded-lg transition-colors",
+                    featuredDragOver && "ring-2 ring-[var(--brand)] ring-offset-2 ring-offset-[var(--surface)]"
+                  )}
+                  onDragOver={onFeaturedDragOver}
+                  onDragLeave={onFeaturedDragLeave}
+                  onDrop={onFeaturedDrop}
+                >
                   <img
                     src={state.featured_image_url}
                     alt="תמונה ראשית"
                     onClick={() => setLightbox(true)}
                     className="w-full cursor-zoom-in rounded-lg border border-[var(--border)]"
                   />
+                  {featuredDragOver && (
+                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 rounded-lg bg-[var(--brand)]/80 text-white">
+                      <UploadCloud className="size-6" />
+                      <span className="text-xs font-medium">שחרר להחלפה</span>
+                    </div>
+                  )}
                   <div className="absolute left-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                     <button
                       onClick={() => setLightbox(true)}
@@ -702,9 +793,32 @@ export function PostEditor({
                   </div>
                 </div>
               ) : (
-                <div className="mb-3 flex h-32 items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-[var(--muted)]">
-                  <ImagePlus className="size-6" />
-                </div>
+                <button
+                  type="button"
+                  disabled={busy === "upload"}
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={onFeaturedDragOver}
+                  onDragLeave={onFeaturedDragLeave}
+                  onDrop={onFeaturedDrop}
+                  className={cn(
+                    "mb-3 flex h-32 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-[var(--muted)] transition-colors",
+                    featuredDragOver
+                      ? "border-[var(--brand)] bg-[var(--brand)]/10 text-[var(--brand)]"
+                      : "border-[var(--border)] hover:border-[var(--brand)] hover:bg-[var(--surface-2)] hover:text-[var(--brand)]",
+                    busy === "upload" && "opacity-60"
+                  )}
+                >
+                  {busy === "upload" ? (
+                    <Spinner className="size-6" />
+                  ) : (
+                    <>
+                      <UploadCloud className="size-6" />
+                      <span className="text-xs">
+                        {featuredDragOver ? "שחרר להעלאה" : "גרור תמונה לכאן או לחץ לבחירה"}
+                      </span>
+                    </>
+                  )}
+                </button>
               )}
               <div className="space-y-2">
                 {/* Optional product reference for AI generation */}
@@ -853,12 +967,12 @@ export function PostEditor({
               <h3 className="text-sm font-semibold text-[var(--text)]">Yoast SEO</h3>
               <div>
                 <Label htmlFor="fk">מילת מפתח (Focus Keyword)</Label>
-                <Input id="fk" value={state.focus_keyword} onChange={(e) => set("focus_keyword", e.target.value)} />
+                <Input id="fk" dir={contentDir} value={state.focus_keyword} onChange={(e) => set("focus_keyword", e.target.value)} />
                 <p className="mt-1 text-xs text-[var(--muted)]">{state.focus_keyword.length} תווים</p>
               </div>
               <div>
                 <Label htmlFor="st">כותרת SEO</Label>
-                <Input id="st" value={state.seo_title} onChange={(e) => set("seo_title", e.target.value)} />
+                <Input id="st" dir={contentDir} value={state.seo_title} onChange={(e) => set("seo_title", e.target.value)} />
                 <p className="mt-1 text-xs text-[var(--muted)]">{state.seo_title.length} תווים · אידיאלי 50–60</p>
               </div>
               <div>
@@ -866,6 +980,7 @@ export function PostEditor({
                 <textarea
                   id="md"
                   rows={3}
+                  dir={contentDir}
                   value={state.meta_description}
                   onChange={(e) => set("meta_description", e.target.value)}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus-visible:border-[var(--brand)] focus-visible:ring-2 focus-visible:ring-[var(--brand)]/40"
@@ -895,6 +1010,7 @@ export function PostEditor({
                   slug: slugify(state.seo_title || state.title),
                   siteUrl: activeProject.site_url,
                   titleWidth: measureTitleWidth(state.seo_title || state.title),
+                  locale: contentLang,
                 }}
               />
             </Card>
